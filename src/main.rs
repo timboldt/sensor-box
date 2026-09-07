@@ -1,8 +1,7 @@
-//! sensor-box — Phase 1 step 1: bare skeleton.
+//! Environmental sensor box firmware for the Adafruit ESP32-C6 Feather.
 //!
-//! Boots the Embassy executor on the ESP32-C6 and prints a heartbeat over the
-//! built-in USB-Serial-JTAG so we can confirm the toolchain / build / flash path
-//! before wiring up any peripherals.
+//! Reads a set of I2C environmental sensors, shows live values and recent history
+//! on a TFT FeatherWing, and logs timestamped CSV to the SD card.
 
 #![no_std]
 #![no_main]

@@ -2,18 +2,24 @@
 name = "sensor-box"
 version = "0.1.0"
 edition = "2024"
+description = "Environmental monitor firmware for the Adafruit ESP32-C6 Feather"
+authors = ["Tim Boldt <tim.boldt@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/timboldt/sensor-box"
 publish = false
 
+# Exact versions are locked in Cargo.lock (committed). The esp-* crates make
+# breaking changes freely across minor releases, so bump them deliberately.
 [dependencies]
-esp-hal = { version = "=1.2.0", features = ["esp32c6", "unstable"] }
-esp-rtos = { version = "=0.4.0", features = ["esp32c6", "embassy"] }
-esp-backtrace = { version = "=0.20.0", features = [
+esp-hal = { version = "1.2.0", features = ["esp32c6", "unstable"] }
+esp-rtos = { version = "0.4.0", features = ["esp32c6", "embassy"] }
+esp-backtrace = { version = "0.20.0", features = [
     "esp32c6",
     "panic-handler",
     "println",
 ] }
-esp-bootloader-esp-idf = { version = "=0.6.0", features = ["esp32c6"] }
-esp-println = { version = "=0.18.0", features = ["esp32c6"] }
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32c6"] }
+esp-println = { version = "0.18.0", features = ["esp32c6"] }
 embassy-executor = "0.10.0"
 embassy-time = "0.5.0"
 
