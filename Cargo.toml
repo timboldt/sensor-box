@@ -1,0 +1,27 @@
+[package]
+name = "sensor-box"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+esp-hal = { version = "=1.2.0", features = ["esp32c6", "unstable"] }
+esp-rtos = { version = "=0.4.0", features = ["esp32c6", "embassy"] }
+esp-backtrace = { version = "=0.20.0", features = [
+    "esp32c6",
+    "panic-handler",
+    "println",
+] }
+esp-bootloader-esp-idf = { version = "=0.6.0", features = ["esp32c6"] }
+esp-println = { version = "=0.18.0", features = ["esp32c6"] }
+embassy-executor = "0.10.0"
+embassy-time = "0.5.0"
+
+[profile.dev]
+opt-level = "s"
+
+[profile.release]
+debug = 2
+lto = "fat"
+codegen-units = 1
+opt-level = "s"
