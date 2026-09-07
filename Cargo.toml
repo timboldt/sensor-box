@@ -27,6 +27,10 @@ embassy-sync = "0.8.0"
 embedded-hal-async = "1.0.0"
 static_cell = "2.1.1"
 
+# Sensor drivers
+pmsa003i = { version = "0.1.11", features = ["async"] }
+aqi = "0.2.0"
+
 [profile.dev]
 opt-level = "s"
 

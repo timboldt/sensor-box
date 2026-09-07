@@ -23,9 +23,11 @@
 
 use core::cell::RefCell;
 
+use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_embedded_hal::shared_bus::blocking::spi::SpiDeviceWithConfig;
 use embassy_sync::blocking_mutex::{Mutex, raw::CriticalSectionRawMutex};
-use embedded_hal_async::i2c::I2c as AsyncI2c;
+use embassy_sync::mutex::Mutex as AsyncMutex;
+use embedded_hal_async::i2c::I2c as _;
 use esp_hal::{
     Async,
     Blocking,
@@ -40,6 +42,14 @@ use esp_hal::{
 };
 use esp_println::println;
 use static_cell::StaticCell;
+
+/// The shared async I2C bus, behind a critical-section mutex.
+type I2cBus = AsyncMutex<CriticalSectionRawMutex, I2c<'static, Async>>;
+
+/// One handle onto the shared I2C bus; each sensor driver gets its own.
+pub type I2cBusDevice = I2cDevice<'static, CriticalSectionRawMutex, I2c<'static, Async>>;
+
+static I2C_BUS: StaticCell<I2cBus> = StaticCell::new();
 
 /// The shared blocking SPI bus, behind a critical-section mutex.
 type SpiBus = Mutex<CriticalSectionRawMutex, RefCell<Spi<'static, Blocking>>>;
@@ -57,7 +67,8 @@ static SPI_BUS: StaticCell<SpiBus> = StaticCell::new();
 #[allow(dead_code)]
 pub struct Board {
     /// Shared I2C bus: PMSA003I, BME280, TSL2591, SGP30, DS3231.
-    pub i2c: I2c<'static, Async>,
+    /// Get a per-sensor handle with [`Board::i2c`].
+    pub i2c_bus: &'static I2cBus,
     /// ILI9341 display, on the shared SPI bus.
     pub display_spi: SpiBusDevice,
     /// Display data/command select line.
@@ -91,6 +102,7 @@ impl Board {
         .with_sda(p.GPIO19)
         .with_scl(p.GPIO18)
         .into_async();
+        let i2c_bus: &'static I2cBus = I2C_BUS.init(AsyncMutex::new(i2c));
 
         let spi = Spi::new(
             p.SPI2,
@@ -132,7 +144,7 @@ impl Board {
         );
 
         Self {
-            i2c,
+            i2c_bus,
             display_spi,
             display_dc,
             sd_spi,
@@ -141,12 +153,18 @@ impl Board {
         }
     }
 
+    /// A fresh handle onto the shared I2C bus.
+    pub fn i2c(&self) -> I2cBusDevice {
+        I2cDevice::new(self.i2c_bus)
+    }
+
     /// Probe every 7-bit address on the I2C bus and log which ones respond.
     /// Bring-up diagnostic only.
-    pub async fn i2c_scan(&mut self) {
+    pub async fn i2c_scan(&self) {
+        let mut dev = self.i2c();
         let mut found = 0u32;
         for addr in 0x08u8..=0x77 {
-            if AsyncI2c::write(&mut self.i2c, addr, &[]).await.is_ok() {
+            if dev.write(addr, &[]).await.is_ok() {
                 println!("i2c: device found at 0x{addr:02x}");
                 found += 1;
             }
