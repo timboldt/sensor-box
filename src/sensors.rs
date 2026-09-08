@@ -4,8 +4,10 @@
 //! failing or absent sensor logs a warning and leaves its fields as `None`
 //! rather than bringing the whole box down.
 
+mod climate;
 mod pm;
 
+pub use climate::Climate;
 pub use pm::Pm;
 
 /// A snapshot of every sensor value. Fields are `None` until read, or when the
@@ -21,4 +23,11 @@ pub struct Reading {
     /// US EPA Air Quality Index: the worse of the PM2.5 and PM10 sub-indices.
     /// `None` if a concentration is off the top of the AQI scale (> 500).
     pub aqi: Option<u16>,
+
+    /// Air temperature, °C.
+    pub temp_c: Option<f32>,
+    /// Relative humidity, %.
+    pub rh: Option<f32>,
+    /// Barometric pressure, hPa.
+    pub pressure_hpa: Option<f32>,
 }

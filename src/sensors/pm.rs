@@ -25,10 +25,10 @@ impl Pm {
 
     /// Read the sensor and merge the PM fields into `reading`. On error, logs a
     /// warning and clears those fields.
-    pub async fn read_into(&mut self, reading: &mut Reading) {
-        match self.dev.read().await {
+    pub fn read_into(&mut self, reading: &mut Reading) {
+        match self.dev.read() {
             Ok(frame) => {
-                esp_println::println!("pm: {frame:?}");
+                // esp_println::println!("pm: {frame:?}");
                 reading.pm1_0 = Some(frame.env_pm1);
                 reading.pm2_5 = Some(frame.env_pm2_5);
                 reading.pm10 = Some(frame.env_pm10);

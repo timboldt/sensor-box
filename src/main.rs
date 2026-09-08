@@ -15,7 +15,7 @@ use esp_backtrace as _;
 use esp_println::println;
 
 use crate::board::Board;
-use crate::sensors::{Pm, Reading};
+use crate::sensors::{Climate, Pm, Reading};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -24,13 +24,15 @@ async fn main(_spawner: Spawner) {
     let board = Board::init();
     println!("sensor-box: board initialised");
 
-    board.i2c_scan().await;
+    board.i2c_scan();
 
     let mut pm = Pm::new(board.i2c());
+    let mut climate = Climate::new(board.i2c());
 
     loop {
         let mut reading = Reading::default();
-        pm.read_into(&mut reading).await;
+        pm.read_into(&mut reading);
+        climate.read_into(&mut reading);
         println!("{reading:?}");
         Timer::after(Duration::from_secs(5)).await;
     }

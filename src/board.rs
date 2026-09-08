@@ -23,13 +23,11 @@
 
 use core::cell::RefCell;
 
-use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
+use embassy_embedded_hal::shared_bus::blocking::i2c::I2cDevice;
 use embassy_embedded_hal::shared_bus::blocking::spi::SpiDeviceWithConfig;
 use embassy_sync::blocking_mutex::{Mutex, raw::CriticalSectionRawMutex};
-use embassy_sync::mutex::Mutex as AsyncMutex;
-use embedded_hal_async::i2c::I2c as _;
+use embedded_hal::i2c::I2c as _;
 use esp_hal::{
-    Async,
     Blocking,
     gpio::{Level, Output, OutputConfig},
     i2c::master::{Config as I2cConfig, I2c},
@@ -43,11 +41,13 @@ use esp_hal::{
 use esp_println::println;
 use static_cell::StaticCell;
 
-/// The shared async I2C bus, behind a critical-section mutex.
-type I2cBus = AsyncMutex<CriticalSectionRawMutex, I2c<'static, Async>>;
+/// The shared I2C bus, behind a critical-section mutex. The esp-hal I2C driver
+/// blocks for the (sub-millisecond) duration of each transfer; that is fine at
+/// our polling rates and keeps every sensor driver on the simpler blocking API.
+type I2cBus = Mutex<CriticalSectionRawMutex, RefCell<I2c<'static, Blocking>>>;
 
 /// One handle onto the shared I2C bus; each sensor driver gets its own.
-pub type I2cBusDevice = I2cDevice<'static, CriticalSectionRawMutex, I2c<'static, Async>>;
+pub type I2cBusDevice = I2cDevice<'static, CriticalSectionRawMutex, I2c<'static, Blocking>>;
 
 static I2C_BUS: StaticCell<I2cBus> = StaticCell::new();
 
@@ -100,9 +100,8 @@ impl Board {
         )
         .unwrap()
         .with_sda(p.GPIO19)
-        .with_scl(p.GPIO18)
-        .into_async();
-        let i2c_bus: &'static I2cBus = I2C_BUS.init(AsyncMutex::new(i2c));
+        .with_scl(p.GPIO18);
+        let i2c_bus: &'static I2cBus = I2C_BUS.init(Mutex::new(RefCell::new(i2c)));
 
         let spi = Spi::new(
             p.SPI2,
@@ -160,11 +159,11 @@ impl Board {
 
     /// Probe every 7-bit address on the I2C bus and log which ones respond.
     /// Bring-up diagnostic only.
-    pub async fn i2c_scan(&self) {
+    pub fn i2c_scan(&self) {
         let mut dev = self.i2c();
         let mut found = 0u32;
         for addr in 0x08u8..=0x77 {
-            if dev.write(addr, &[]).await.is_ok() {
+            if dev.write(addr, &[]).is_ok() {
                 println!("i2c: device found at 0x{addr:02x}");
                 found += 1;
             }
