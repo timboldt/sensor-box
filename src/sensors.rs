@@ -5,9 +5,11 @@
 //! rather than bringing the whole box down.
 
 mod climate;
+mod gas;
 mod pm;
 
 pub use climate::Climate;
+pub use gas::Gas;
 pub use pm::Pm;
 
 /// A snapshot of every sensor value. Fields are `None` until read, or when the
@@ -30,4 +32,9 @@ pub struct Reading {
     pub rh: Option<f32>,
     /// Barometric pressure, hPa.
     pub pressure_hpa: Option<f32>,
+
+    /// Equivalent CO₂, ppm (SGP30 model estimate, not a real CO₂ measurement).
+    pub eco2_ppm: Option<u16>,
+    /// Total volatile organic compounds, ppb.
+    pub tvoc_ppb: Option<u16>,
 }

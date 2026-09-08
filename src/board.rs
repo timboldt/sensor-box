@@ -30,12 +30,12 @@ use embedded_hal::i2c::I2c as _;
 use esp_hal::{
     Blocking,
     gpio::{Level, Output, OutputConfig},
-    i2c::master::{Config as I2cConfig, I2c},
+    i2c::master::{BusTimeout, Config as I2cConfig, I2c, SoftwareTimeout},
     spi::{
         Mode,
         master::{Config as SpiConfig, Spi},
     },
-    time::Rate,
+    time::{Duration, Rate},
     timer::timg::TimerGroup,
 };
 use esp_println::println;
@@ -96,7 +96,12 @@ impl Board {
 
         let i2c = I2c::new(
             p.I2C0,
-            I2cConfig::default().with_frequency(Rate::from_khz(100)),
+            I2cConfig::default()
+                .with_frequency(Rate::from_khz(100))
+                // Without these, a stuck bus (e.g. a half-seated STEMMA
+                // connector holding SDA low) hangs the first transfer forever.
+                .with_timeout(BusTimeout::Maximum)
+                .with_software_timeout(SoftwareTimeout::Transaction(Duration::from_millis(50))),
         )
         .unwrap()
         .with_sda(p.GPIO19)

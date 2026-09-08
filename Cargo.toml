@@ -31,6 +31,8 @@ static_cell = "2.1.1"
 pmsa003i = "0.1.11"
 aqi = "0.2.0"
 bme280 = "0.5.1"
+sgp30 = "1.0.0"
+libm = "0.2.11"
 
 [profile.dev]
 opt-level = "s"
