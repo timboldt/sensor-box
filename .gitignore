@@ -1,2 +1,14 @@
-/target
-.venv
+.venv/
+
+# West workspace — fetched by `west update`, not part of this repo.
+/.west/
+/zephyr/
+/modules/
+/bootloader/
+/tools/
+/test/
+/nrf/
+/build/
+
+# Old Rust firmware, kept for reference.
+/OLD-RUST/target/

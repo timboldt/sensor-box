@@ -1,0 +1,36 @@
+# West manifest for the sensor-box application (T3 "freestanding app" layout).
+#
+# This repo is the manifest repo. `west update` pulls Zephyr — and, via
+# import, every module Zephyr itself needs — as sibling directories that are
+# git-ignored here. Bump `revision` deliberately to move to a new Zephyr
+# release; everything else follows from Zephyr's own manifest.
+#
+#   west init -l .
+#   west update
+#
+manifest:
+  version: "1.2"
+
+  remotes:
+    - name: upstream
+      url-base: https://github.com/zephyrproject-rtos
+
+  projects:
+    - name: zephyr
+      remote: upstream
+      revision: v4.4.0
+      # Pull in Zephyr's modules, but only the groups this app actually needs.
+      import:
+        name-allowlist:
+          - cmsis                 # Cortex-M / RISC-V CMSIS headers
+          - hal_espressif         # ESP32-C6 SoC HAL + Wi-Fi blobs
+          - hal_nordic            # (harmless; some samples/bindings assume it)
+          - lvgl                  # TFT UI
+          - mcuboot               # bootloader (drop if not signing images)
+          - nanopb
+          - picolibc
+          - segger                # RTT logging (optional but handy)
+          - tinycrypt
+
+  self:
+    path: sensor-box
