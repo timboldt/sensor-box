@@ -32,6 +32,7 @@ static const struct device *const bme280 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(bm
 static const struct device *const tsl2591 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(tsl2591));
 static const struct device *const max17048 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(max17048));
 static const struct device *const pmsa003i = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(pmsa003i));
+static const struct device *const sgp30 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(sgp30));
 
 static void report_bme280(void)
 {
@@ -124,6 +125,32 @@ static void report_pmsa003i(void)
 		pm1.val1, pm25.val1, pm10.val1);
 }
 
+static void report_sgp30(void)
+{
+	if (sgp30 == NULL || !device_is_ready(sgp30)) {
+		LOG_WRN("sgp30: not ready, skipping");
+		return;
+	}
+
+	int ret = sensor_sample_fetch(sgp30);
+
+	if (ret == -EAGAIN) {
+		LOG_INF("sgp30: warming up");
+		return;
+	}
+	if (ret != 0) {
+		LOG_WRN("sgp30: sample fetch failed: %d", ret);
+		return;
+	}
+
+	struct sensor_value eco2, tvoc;
+
+	sensor_channel_get(sgp30, SENSOR_CHAN_CO2, &eco2);
+	sensor_channel_get(sgp30, SENSOR_CHAN_VOC, &tvoc);
+
+	LOG_INF("sgp30:   eCO2 %d ppm  TVOC %d ppb", eco2.val1, tvoc.val1);
+}
+
 int main(void)
 {
 	LOG_INF("sensor-box starting on %s", CONFIG_BOARD_TARGET);
@@ -143,6 +170,7 @@ int main(void)
 			report_bme280();
 			report_tsl2591();
 			report_pmsa003i();
+			report_sgp30();
 			report_max17048();
 		}
 

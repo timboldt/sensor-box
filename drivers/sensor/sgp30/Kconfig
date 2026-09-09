@@ -1,0 +1,14 @@
+# Sensirion SGP30 indoor air quality sensor
+
+# SPDX-License-Identifier: MIT
+
+config SGP30
+	bool "Sensirion SGP30 eCO2 / TVOC sensor"
+	default y
+	depends on DT_HAS_SENSIRION_SGP30_ENABLED
+	select I2C
+	select CRC
+	help
+	  Enable driver for the Sensirion SGP30 indoor air quality sensor.
+	  The driver runs the mandatory 1 Hz measurement cadence itself using
+	  a delayable work item on the system workqueue.

@@ -2,3 +2,4 @@
 # Sourced at the top level via zephyr/module.yml (build.kconfig).
 
 rsource "sensor/pmsa003i/Kconfig"
+rsource "sensor/sgp30/Kconfig"

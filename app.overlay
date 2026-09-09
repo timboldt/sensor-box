@@ -39,4 +39,10 @@
 		compatible = "plantower,pmsa003i";
 		reg = <0x12>;
 	};
+
+	/* Adafruit SGP30 eCO2 / TVOC sensor (out-of-tree driver). */
+	sgp30: sgp30@58 {
+		compatible = "sensirion,sgp30";
+		reg = <0x58>;
+	};
 };

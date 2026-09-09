@@ -1,0 +1,15 @@
+# Copyright (c) 2026 Tim Boldt
+# SPDX-License-Identifier: MIT
+
+description: |
+  Sensirion SGP30 indoor air quality sensor (eCO2 / TVOC).
+
+  The driver drives the sensor at the datasheet-mandated 1 Hz cadence on
+  its own and caches the latest reading; sensor_sample_fetch() is a no-op
+  and sensor_channel_get() returns the cached eCO2 (SENSOR_CHAN_CO2, ppm)
+  and TVOC (SENSOR_CHAN_VOC, ppb). Values are fixed at 400 ppm / 0 ppb for
+  the first ~15 s after power-up while the sensor warms up.
+
+compatible: "sensirion,sgp30"
+
+include: [sensor-device.yaml, i2c-device.yaml]
