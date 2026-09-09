@@ -1,0 +1,20 @@
+/*
+ * Copyright (c) 2026 Tim Boldt
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+
+#include <espressif/esp32c6/esp32c6_lpcore_wroom_n4.dtsi>
+#include <espressif/partitions_0x0_default.dtsi>
+
+/ {
+	model = "Adafruit Feather ESP32-C6 LP Core";
+	compatible = "adafruit,feather-esp32c6", "espressif,esp32c6";
+
+	chosen {
+		zephyr,sram = &ulp_ram;
+		zephyr,code-partition = &slot0_lpcore_partition;
+	};
+};

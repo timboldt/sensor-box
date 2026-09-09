@@ -1,0 +1,125 @@
+/*
+ * Copyright (c) 2026 Tim Boldt
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+
+#include <espressif/esp32c6/esp32c6_wroom_n4.dtsi>
+#include "adafruit_feather_esp32c6-pinctrl.dtsi"
+#include "feather_connector.dtsi"
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+#include <espressif/partitions_0x0_default.dtsi>
+
+/ {
+	model = "Adafruit Feather ESP32-C6 HP Core";
+	compatible = "adafruit,feather-esp32c6", "espressif,esp32c6";
+
+	chosen {
+		zephyr,sram = &sramhp;
+		/* Native USB-Serial/JTAG carries the console (plain USB-C cable). */
+		zephyr,console = &usb_serial;
+		zephyr,shell-uart = &usb_serial;
+		zephyr,flash = &flash0;
+		zephyr,code-partition = &slot0_partition;
+		zephyr,ieee802154 = &ieee802154;
+	};
+
+	aliases {
+		sw0 = &boot_button;
+		led0 = &red_led;
+		i2c-0 = &i2c0;
+		watchdog0 = &wdt0;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		red_led: led_0 {
+			gpios = <&gpio0 15 GPIO_ACTIVE_HIGH>;
+			label = "Red LED (IO15)";
+		};
+	};
+
+	gpio_keys {
+		compatible = "gpio-keys";
+
+		boot_button: button_0 {
+			gpios = <&gpio0 9 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			label = "BOOT / User button (IO9)";
+			zephyr,code = <INPUT_KEY_0>;
+		};
+	};
+
+	/*
+	 * The STEMMA QT / Qwiic connector and the I2C pull-ups are fed by an
+	 * on-board load switch on this board family. If I2C devices are missing
+	 * at boot, wire this up (verify the enable GPIO against the schematic)
+	 * and add `power-domains = <&i2c_reg>;` to the I2C child nodes:
+	 *
+	 * i2c_reg: i2c_reg {
+	 *         compatible = "power-domain-gpio";
+	 *         #power-domain-cells = <0>;
+	 *         enable-gpios = <&gpio0 20 GPIO_ACTIVE_HIGH>;  // TODO: confirm pin
+	 * };
+	 */
+};
+
+&usb_serial {
+	status = "okay";
+};
+
+/* Feather header UART (TX=IO16 / RX=IO17). Not the console. */
+&uart1 {
+	status = "okay";
+	current-speed = <115200>;
+	pinctrl-0 = <&uart1_default>;
+	pinctrl-names = "default";
+};
+
+&i2c0 {
+	status = "okay";
+	clock-frequency = <I2C_BITRATE_FAST>;
+	pinctrl-0 = <&i2c0_default>;
+	pinctrl-names = "default";
+};
+
+&spi2 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+	pinctrl-0 = <&spim2_default>;
+	pinctrl-names = "default";
+	/*
+	 * The 2.4" TFT FeatherWing puts the ILI9341 and the microSD slot on
+	 * this bus with separate GPIO chip-selects. Declare them in the
+	 * application overlay, e.g.:
+	 *   cs-gpios = <&gpio0 X GPIO_ACTIVE_LOW>,   // TFT_CS
+	 *              <&gpio0 Y GPIO_ACTIVE_LOW>;   // SD_CS
+	 */
+};
+
+&gpio0 {
+	status = "okay";
+};
+
+&trng0 {
+	status = "okay";
+};
+
+&wdt0 {
+	status = "okay";
+};
+
+&wifi {
+	status = "okay";
+};
+
+&ieee802154 {
+	status = "okay";
+};
+
+&esp32_bt_hci {
+	status = "okay";
+};

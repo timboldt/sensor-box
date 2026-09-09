@@ -1,0 +1,58 @@
+/*
+ * Copyright (c) 2026 Tim Boldt
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Adafruit Feather header nexus for the ESP32-C6 Feather.
+ *
+ * CONFIRMED from https://learn.adafruit.com/adafruit-esp32-c6-feather/pinouts :
+ *   SCK  = IO21   MOSI = IO22   MISO = IO23
+ *   RX   = IO17   TX   = IO16
+ *   SDA  = IO19   SCL  = IO18
+ *   A2   = IO6    A3   = IO5    (A2 shares IO6, A3 shares IO5)
+ *   IO9 shared by Boot button + on-board NeoPixel
+ *   Other digital pads broken out: IO0, IO7, IO8, IO12, IO15
+ *
+ * TODO: A0, A1, A4, A5 and the D4/D5/D6/D10..D13 header positions are not
+ * spelled out in the Adafruit text pinout. Fill the remaining gpio-map rows
+ * from the PrettyPins diagram / schematic before relying on feather_header.
+ * sensor-box itself only uses feather_i2c and feather_spi, which are complete.
+ */
+
+/ {
+	feather_header: connector {
+		compatible = "adafruit-feather-header";
+		#gpio-cells = <2>;
+		gpio-map-mask = <0xffffffff 0xffffffc0>;
+		gpio-map-pass-thru = <0 0x3f>;
+		gpio-map = <
+			/*  0  A0 */	/* TODO */
+			/*  1  A1 */	/* TODO */
+			2 0 &gpio0 6 0		/* A2  */
+			3 0 &gpio0 5 0		/* A3  */
+			/*  4  A4 */	/* TODO */
+			/*  5  A5 */	/* TODO */
+			6 0 &gpio0 21 0		/* SCK  */
+			7 0 &gpio0 22 0		/* MOSI */
+			8 0 &gpio0 23 0		/* MISO */
+			9 0 &gpio0 17 0		/* RX   */
+			10 0 &gpio0 16 0	/* TX   */
+			/* 11  D4 */	/* TODO */
+			12 0 &gpio0 19 0	/* SDA  */
+			13 0 &gpio0 18 0	/* SCL  */
+			/* 14  D5 */	/* TODO */
+			/* 15  D6 */	/* TODO */
+			16 0 &gpio0 9 0		/* D9 (also Boot btn / NeoPixel) */
+			/* 17  D10 */	/* TODO */
+			/* 18  D11 */	/* TODO */
+			/* 19  D12 */	/* TODO */
+			/* 20  D13 */	/* TODO */
+		>;
+	};
+};
+
+feather_serial: &uart1 {};
+
+feather_i2c: &i2c0 {};
+
+feather_spi: &spi2 {};
