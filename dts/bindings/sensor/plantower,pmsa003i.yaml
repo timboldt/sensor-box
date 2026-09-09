@@ -1,0 +1,13 @@
+# Copyright (c) 2026 Tim Boldt
+# SPDX-License-Identifier: MIT
+
+description: |
+  Plantower PMSA003I laser particulate matter sensor (I2C interface).
+
+  Reports PM1.0 / PM2.5 / PM10 mass concentration in ug/m^3 (both the
+  CF=1 "standard particle" calibration and the atmospheric-environment
+  calibration) plus particle counts per 0.1 L for six size bins.
+
+compatible: "plantower,pmsa003i"
+
+include: [sensor-device.yaml, i2c-device.yaml]

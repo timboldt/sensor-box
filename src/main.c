@@ -31,6 +31,7 @@ static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
 static const struct device *const bme280 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(bme280));
 static const struct device *const tsl2591 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(tsl2591));
 static const struct device *const max17048 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(max17048));
+static const struct device *const pmsa003i = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(pmsa003i));
 
 static void report_bme280(void)
 {
@@ -101,6 +102,28 @@ static void report_max17048(void)
 		(double)v_uv.voltage / 1e6, soc_pct.relative_state_of_charge);
 }
 
+static void report_pmsa003i(void)
+{
+	if (pmsa003i == NULL || !device_is_ready(pmsa003i)) {
+		LOG_WRN("pmsa003i: not ready, skipping");
+		return;
+	}
+
+	if (sensor_sample_fetch(pmsa003i) != 0) {
+		LOG_WRN("pmsa003i: sample fetch failed");
+		return;
+	}
+
+	struct sensor_value pm1, pm25, pm10;
+
+	sensor_channel_get(pmsa003i, SENSOR_CHAN_PM_1_0, &pm1);
+	sensor_channel_get(pmsa003i, SENSOR_CHAN_PM_2_5, &pm25);
+	sensor_channel_get(pmsa003i, SENSOR_CHAN_PM_10, &pm10);
+
+	LOG_INF("pmsa003i: PM1.0 %d  PM2.5 %d  PM10 %d  ug/m3",
+		pm1.val1, pm25.val1, pm10.val1);
+}
+
 int main(void)
 {
 	LOG_INF("sensor-box starting on %s", CONFIG_BOARD_TARGET);
@@ -119,6 +142,7 @@ int main(void)
 			LOG_INF("--- tick %u ---", tick);
 			report_bme280();
 			report_tsl2591();
+			report_pmsa003i();
 			report_max17048();
 		}
 

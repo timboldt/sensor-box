@@ -1,0 +1,12 @@
+# Plantower PMSA003I particulate matter sensor
+
+# SPDX-License-Identifier: MIT
+
+config PMSA003I
+	bool "Plantower PMSA003I particulate matter sensor"
+	default y
+	depends on DT_HAS_PLANTOWER_PMSA003I_ENABLED
+	select I2C
+	help
+	  Enable driver for the Plantower PMSA003I I2C particulate matter
+	  sensor (PM1.0 / PM2.5 / PM10 mass concentration and particle counts).

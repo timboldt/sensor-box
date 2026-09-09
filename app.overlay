@@ -33,4 +33,10 @@
 		compatible = "maxim,max17048";
 		reg = <0x36>;
 	};
+
+	/* Adafruit PMSA003I particulate matter sensor (out-of-tree driver). */
+	pmsa003i: pmsa003i@12 {
+		compatible = "plantower,pmsa003i";
+		reg = <0x12>;
+	};
 };
