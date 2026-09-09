@@ -27,14 +27,21 @@
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/sys/crc.h>
+
+#include <sensor_box/sgp30.h>
 
 LOG_MODULE_REGISTER(SGP30, CONFIG_SENSOR_LOG_LEVEL);
 
 #define SGP30_CMD_IAQ_INIT       0x2003
 #define SGP30_CMD_IAQ_MEASURE    0x2008
+#define SGP30_CMD_SET_HUMIDITY   0x2061
 #define SGP30_CMD_GET_FEATURESET 0x202F
+
+/* Sentinel meaning "no humidity value has been pushed by attr_set yet". */
+#define SGP30_AH_UNSET           UINT32_MAX
 
 #define SGP30_CRC_POLY           0x31
 #define SGP30_CRC_INIT           0xFF
@@ -54,6 +61,14 @@ struct sgp30_data {
 	uint16_t eco2_ppm;
 	uint16_t tvoc_ppb;
 	bool valid;   /* at least one good measurement cached */
+
+	/*
+	 * Absolute humidity as 8.8 fixed-point g/m^3, set from attr_set()
+	 * (main thread) and consumed by the work handler (sysworkq). Holds
+	 * SGP30_AH_UNSET until the application pushes a value.
+	 */
+	atomic_t abs_humidity_8_8;
+	uint16_t ah_last_sent;   /* work-handler-private */
 };
 
 static uint8_t sgp30_crc(const uint8_t *data)
@@ -100,6 +115,19 @@ static int sgp30_read_words(const struct device *dev, uint16_t *words, size_t n_
 	return 0;
 }
 
+/* Send Set_humidity: command word + 1 data word (abs humidity, 8.8 g/m^3). */
+static int sgp30_send_humidity(const struct device *dev, uint16_t ah_8_8)
+{
+	const struct sgp30_config *cfg = dev->config;
+	uint8_t buf[5];
+
+	sys_put_be16(SGP30_CMD_SET_HUMIDITY, buf);
+	sys_put_be16(ah_8_8, &buf[2]);
+	buf[4] = sgp30_crc(&buf[2]);
+
+	return i2c_write_dt(&cfg->i2c, buf, sizeof(buf));
+}
+
 static void sgp30_measure_work(struct k_work *work)
 {
 	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
@@ -110,6 +138,18 @@ static void sgp30_measure_work(struct k_work *work)
 
 	/* Reschedule first so a transient error doesn't stop the 1 Hz cadence. */
 	k_work_reschedule(&data->measure_work, SGP30_MEASURE_PERIOD);
+
+	/* Push a new absolute-humidity value to the sensor if it changed. */
+	atomic_val_t ah = atomic_get(&data->abs_humidity_8_8);
+
+	if (ah != SGP30_AH_UNSET && (uint16_t)ah != data->ah_last_sent) {
+		if (sgp30_send_humidity(dev, (uint16_t)ah) == 0) {
+			data->ah_last_sent = (uint16_t)ah;
+			k_sleep(K_MSEC(SGP30_MEASURE_WAIT_MS));
+		} else {
+			LOG_WRN("Set_humidity failed");
+		}
+	}
 
 	ret = sgp30_send_cmd(dev, SGP30_CMD_IAQ_MEASURE);
 	if (ret < 0) {
@@ -164,9 +204,29 @@ static int sgp30_channel_get(const struct device *dev, enum sensor_channel chan,
 	return 0;
 }
 
+static int sgp30_attr_set(const struct device *dev, enum sensor_channel chan,
+			  enum sensor_attribute attr, const struct sensor_value *val)
+{
+	struct sgp30_data *data = dev->data;
+
+	if ((int)attr != SENSOR_ATTR_SGP30_ABS_HUMIDITY) {
+		return -ENOTSUP;
+	}
+
+	/* g/m^3 (val1.val2) -> 8.8 fixed-point, clamped to the u16 range. */
+	int64_t ah_8_8 = (int64_t)val->val1 * 256 +
+			 ((int64_t)val->val2 * 256) / 1000000;
+
+	ah_8_8 = CLAMP(ah_8_8, 0, UINT16_MAX);
+	atomic_set(&data->abs_humidity_8_8, (atomic_val_t)ah_8_8);
+
+	return 0;
+}
+
 static DEVICE_API(sensor, sgp30_api) = {
 	.sample_fetch = sgp30_sample_fetch,
 	.channel_get = sgp30_channel_get,
+	.attr_set = sgp30_attr_set,
 };
 
 static int sgp30_init(const struct device *dev)
@@ -182,6 +242,8 @@ static int sgp30_init(const struct device *dev)
 	}
 
 	data->dev = dev;
+	atomic_set(&data->abs_humidity_8_8, SGP30_AH_UNSET);
+	data->ah_last_sent = 0;
 
 	/* Probe: read the feature set (also confirms CRC wiring). */
 	ret = sgp30_send_cmd(dev, SGP30_CMD_GET_FEATURESET);

@@ -4,13 +4,18 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * Step 4: read the in-tree I2C devices every REPORT_EVERY_TICKS:
+ * Reads every sensor on the box each REPORT_EVERY_TICKS:
  *   - BME280   temp / humidity / pressure   (sensor API)
  *   - TSL2591  ambient light / IR           (sensor API)
+ *   - PMSA003I PM1.0 / 2.5 / 10             (sensor API, out-of-tree)
+ *   - SGP30    eCO2 / TVOC                  (sensor API, out-of-tree)
  *   - MAX17048 battery voltage / charge     (fuel-gauge API)
  * plus the 1 Hz heartbeat + LED blink. A missing device is logged and
- * skipped, never fatal.
+ * skipped, never fatal. The BME280 temp/RH is fed to the SGP30 as
+ * absolute humidity for its on-chip compensation.
  */
+
+#include <math.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -18,6 +23,8 @@
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/fuel_gauge.h>
 #include <zephyr/logging/log.h>
+
+#include <sensor_box/sgp30.h>
 
 LOG_MODULE_REGISTER(sensor_box, LOG_LEVEL_INF);
 
@@ -33,6 +40,32 @@ static const struct device *const tsl2591 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(t
 static const struct device *const max17048 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(max17048));
 static const struct device *const pmsa003i = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(pmsa003i));
 static const struct device *const sgp30 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(sgp30));
+
+/*
+ * Absolute humidity in g/m^3 from temperature (degC) and relative humidity (%),
+ * via the Magnus approximation of saturation vapour pressure.
+ */
+static double abs_humidity_g_m3(double t_c, double rh_pct)
+{
+	double sat_hpa = 6.112 * exp((17.62 * t_c) / (243.12 + t_c));
+	double vp_hpa = (rh_pct / 100.0) * sat_hpa;
+
+	return 216.7 * vp_hpa / (273.15 + t_c);
+}
+
+/* Push absolute humidity to the SGP30 for on-chip compensation. */
+static void feed_sgp30_humidity(double temp_c, double rh_pct)
+{
+	if (sgp30 == NULL || !device_is_ready(sgp30)) {
+		return;
+	}
+
+	struct sensor_value ah;
+
+	sensor_value_from_double(&ah, abs_humidity_g_m3(temp_c, rh_pct));
+	sensor_attr_set(sgp30, SENSOR_CHAN_ALL,
+			(enum sensor_attribute)SENSOR_ATTR_SGP30_ABS_HUMIDITY, &ah);
+}
 
 static void report_bme280(void)
 {
@@ -53,10 +86,14 @@ static void report_bme280(void)
 	sensor_channel_get(bme280, SENSOR_CHAN_HUMIDITY, &humidity);
 
 	/* Zephyr reports temp in degC, pressure in kPa, humidity in %RH. */
-	LOG_INF("bme280:  %.2f C  %.2f %%RH  %.2f hPa",
-		sensor_value_to_double(&temp),
-		sensor_value_to_double(&humidity),
-		sensor_value_to_double(&press) * 10.0);
+	double temp_c = sensor_value_to_double(&temp);
+	double rh_pct = sensor_value_to_double(&humidity);
+
+	LOG_INF("bme280:  %.2f C  %.2f %%RH  %.2f hPa  (AH %.2f g/m3)",
+		temp_c, rh_pct, sensor_value_to_double(&press) * 10.0,
+		abs_humidity_g_m3(temp_c, rh_pct));
+
+	feed_sgp30_humidity(temp_c, rh_pct);
 }
 
 static void report_tsl2591(void)
