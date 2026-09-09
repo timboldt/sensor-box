@@ -6,10 +6,31 @@
  * to "okay" with its pinctrl; here we just declare what's plugged into it.
  */
 
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
 &i2c0 {
+	/*
+	 * Drop from the board default (Fast, 400 kHz) to Standard (100 kHz).
+	 * Four devices daisy-chained on STEMMA QT cables add enough bus
+	 * capacitance to cause intermittent -EFAULT at 400 kHz.
+	 */
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+
 	/* Adafruit BME280 breakout, default (secondary) address. */
 	bme280: bme280@77 {
 		compatible = "bosch,bme280";
 		reg = <0x77>;
+	};
+
+	/* Adafruit TSL2591 high-dynamic-range light sensor. */
+	tsl2591: tsl2591@29 {
+		compatible = "ams,tsl2591";
+		reg = <0x29>;
+	};
+
+	/* On-board MAX17048 LiPo fuel gauge (fuel-gauge API, not sensor API). */
+	max17048: max17048@36 {
+		compatible = "maxim,max17048";
+		reg = <0x36>;
 	};
 };
