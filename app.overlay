@@ -1,0 +1,15 @@
+/*
+ * Application devicetree overlay — devices on the STEMMA QT / Feather I2C bus.
+ *
+ * Zephyr picks up "app.overlay" from the application directory automatically
+ * and merges it on top of the board devicetree. The board already sets i2c0
+ * to "okay" with its pinctrl; here we just declare what's plugged into it.
+ */
+
+&i2c0 {
+	/* Adafruit BME280 breakout, default (secondary) address. */
+	bme280: bme280@77 {
+		compatible = "bosch,bme280";
+		reg = <0x77>;
+	};
+};
