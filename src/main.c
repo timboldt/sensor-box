@@ -18,7 +18,8 @@
  * compensation, and its IAQ baseline is saved to flash (baseline.c). Wi-Fi
  * connects to the network stored on the device (wifi.c), and the clock is
  * set from SNTP once it does (timesync.c). Hourly averages go to
- * a long-term log in flash (ltlog.c).
+ * a long-term log in flash (ltlog.c), and a LAN web dashboard serves it all
+ * (web.c, web/index.html).
  */
 
 #include <math.h>
@@ -40,6 +41,7 @@
 #include "readings.h"
 #include "timesync.h"
 #include "ui.h"
+#include "web.h"
 #include "wifi.h"
 
 LOG_MODULE_REGISTER(sensor_box, LOG_LEVEL_INF);
@@ -289,6 +291,7 @@ int main(void)
 	ltlog_init();
 	timesync_init();
 	wifi_init();
+	web_init();
 
 	uint32_t tick = 0;
 
@@ -309,6 +312,7 @@ int main(void)
 			backlight_set_ambient(r.light_ok, r.lux);
 			history_add(&r);
 			ltlog_add(&r);
+			web_update(&r);
 			baseline_tick();
 
 			if (have_ui) {

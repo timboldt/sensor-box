@@ -8,8 +8,8 @@ Built on [Zephyr RTOS](https://zephyrproject.org/).
 
 **Status:** early work in progress. All sensors are read, logged to the
 console and shown live on the TFT with a 6-hour trend line per reading.
-It joins Wi-Fi and sets its clock (UTC) from SNTP; the web dashboard is not
-yet implemented.
+It joins Wi-Fi, sets its clock from SNTP and serves a web dashboard on the
+local network.
 
 ## Using it
 
@@ -61,6 +61,7 @@ No RTC: wall-clock time, when needed, will come from SNTP over Wi-Fi.
 | `src/wifi.c` | Joins the Wi-Fi network stored on the device |
 | `src/timesync.c` | Sets the clock (UTC) from SNTP once online, then every 6 h |
 | `src/ltlog.c` | Hourly long-term history in flash (FCB) |
+| `src/web.c`, `web/` | Web dashboard: HTTP server, JSON API and the page |
 | `src/backlight.c` | Backlight on/off from ambient light |
 | `app.overlay` | Devicetree for the I2C sensors and the SPI display |
 | `prj.conf`, `Kconfig` | Application Kconfig and its app-specific options |
@@ -68,6 +69,23 @@ No RTC: wall-clock time, when needed, will come from SNTP over Wi-Fi.
 | `drivers/sensor/` | Out-of-tree drivers for PMSA003I and SGP30 |
 | `dts/bindings/` | Devicetree bindings for those drivers |
 | `west.yml` | West manifest (pins the Zephyr version) |
+
+## Web dashboard
+
+Once on Wi-Fi, open **http://sensor-box.local** (or the IP address the box
+logs at boot) on any device on the same network. It shows the current
+readings, the last 6 hours, and the long-term history (day, week, month or
+all), in your browser's time zone. There is no login: anyone on the network
+can view it, and nothing can be changed from it.
+
+The page is `web/index.html`, built into the firmware. The JSON behind it
+can also be used directly (values are metric; missing values are `null`):
+
+| Endpoint | Contents |
+|----------|----------|
+| `/api/now` | Current readings |
+| `/api/recent` | Last 6 hours, 3-minute averages, oldest first |
+| `/api/history?since=<unix time>` | Hourly averages from flash |
 
 ## Wi-Fi
 

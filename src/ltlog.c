@@ -231,6 +231,26 @@ int ltlog_walk(bool (*cb)(const struct ltlog_record *rec, void *arg), void *arg)
 	return ret < 0 ? ret : w.count;
 }
 
+int ltlog_next(struct ltlog_cursor *c, struct ltlog_record *rec)
+{
+	int ret = -ENOENT;
+
+	k_mutex_lock(&lock, K_FOREVER);
+
+	while (ready && fcb_getnext(&fcb, &c->loc) == 0) {
+		if (c->loc.fe_data_len == sizeof(*rec) &&
+		    flash_area_read(fcb.fap, FCB_ENTRY_FA_DATA_OFF(c->loc), rec,
+				    sizeof(*rec)) == 0 &&
+		    rec->version == LTLOG_RECORD_VERSION) {
+			ret = 0;
+			break;
+		}
+	}
+
+	k_mutex_unlock(&lock);
+	return ret;
+}
+
 /* Shell: "ltlog show [n]" lists the newest n records; "ltlog flush" writes now. */
 
 #define SHOW_MAX 48

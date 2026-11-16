@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sensor Box</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1d2125; --muted: #6b737d;
+    --grid: #e4e7eb; --line: #2f7fc1; --border: #e1e4e8;
+    --good: #23a455; --fair: #c99a06; --poor: #e07b24; --bad: #d64545;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1114; --card: #1a1d22; --text: #eef0f2; --muted: #8b939d;
+      --grid: #2a2f36; --line: #5aa9e6; --border: #262a30;
+      --good: #3ec46d; --fair: #f2c94c; --poor: #f2994a; --bad: #eb5757;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; }
+  h1 { font-size: 22px; margin: 0; }
+  h2 { font-size: 16px; margin: 28px 0 10px; display: flex; align-items: center; gap: 12px; }
+  .status { color: var(--muted); font-size: 13px; }
+  .status.offline { color: var(--bad); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .tile, .chart {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
+  }
+  .tile .label { color: var(--muted); font-size: 13px; }
+  .tile .value { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tile .unit { color: var(--muted); font-size: 13px; margin-left: 3px; font-weight: 400; }
+  .tile .note { color: var(--muted); font-size: 12px; min-height: 1em; }
+  .good { color: var(--good); } .fair { color: var(--fair); }
+  .poor { color: var(--poor); } .bad { color: var(--bad); }
+  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 10px; }
+  .chart .head { display: flex; justify-content: space-between; font-size: 13px; }
+  .chart .head .name { font-weight: 600; }
+  .chart .head .range { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .chart svg { display: block; width: 100%; height: 150px; }
+  .chart svg text { fill: var(--muted); font-size: 11px; }
+  .chart .empty { color: var(--muted); font-size: 13px; padding: 60px 0; text-align: center; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg button {
+    background: var(--card); color: var(--text); border: 0; padding: 4px 10px; font: inherit;
+    font-size: 13px; cursor: pointer;
+  }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button.on { background: var(--line); color: #fff; }
+  footer { color: var(--muted); font-size: 12px; margin: 28px 0 8px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Sensor Box</h1>
+    <span class="status" id="status">connecting…</span>
+  </header>
+
+  <h2>Now</h2>
+  <div class="tiles" id="tiles"></div>
+
+  <h2>Last 6 hours</h2>
+  <div class="charts" id="recent"></div>
+
+  <h2>History
+    <span class="seg" id="ranges">
+      <button data-days="1">Day</button><button data-days="7" class="on">Week</button><button
+        data-days="30">Month</button><button data-days="0">All</button>
+    </span>
+  </h2>
+  <div class="charts" id="history"></div>
+
+  <footer>Hourly averages are kept on the device for about six months. Times are in your browser's time zone.</footer>
+</main>
+
+<script>
+"use strict";
+
+let US = true;  // replaced by /api/now
+
+// Each metric: how to label, convert, format and colour it.
+const METRICS = [
+  { key: "temp",  name: "Temperature", unit: () => US ? "°F" : "°C",
+    conv: v => US ? v * 9 / 5 + 32 : v, dec: 1, span: () => US ? 2 : 1 },
+  { key: "rh",    name: "Humidity", unit: () => "%RH", conv: v => v, dec: 0, span: () => 5 },
+  { key: "press", name: "Pressure (sea level)", unit: () => US ? "inHg" : "hPa",
+    conv: v => US ? v / 33.8639 : v, dec: () => US ? 2 : 0, span: () => US ? 0.05 : 2 },
+  { key: "pm25",  name: "PM2.5", unit: () => "µg/m³", conv: v => v, dec: 0, span: () => 10,
+    bands: [9, 35, 55], warm: "pm_warming" },
+  { key: "eco2",  name: "eCO2", unit: () => "ppm", conv: v => v, dec: 0, span: () => 200,
+    bands: [800, 1200, 2000], warm: "gas_warming" },
+  { key: "tvoc",  name: "TVOC", unit: () => "ppb", conv: v => v, dec: 0, span: () => 50,
+    bands: [220, 660, 2200], warm: "gas_warming" },
+  { key: "lux",   name: "Light", unit: () => "lux", conv: v => v, dec: v => v < 10 ? 1 : 0,
+    span: () => 1, log: true },
+];
+
+const decimals = (m, v) => typeof m.dec === "function" ? m.dec(v) : m.dec;
+const fmt = (m, v) => v.toFixed(decimals(m, v));
+const band = (m, v) => !m.bands ? "" :
+  v <= m.bands[0] ? "good" : v <= m.bands[1] ? "fair" : v <= m.bands[2] ? "poor" : "bad";
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+};
+
+// ---- tiles ----
+
+function renderTiles(d) {
+  const box = document.getElementById("tiles");
+  box.replaceChildren();
+  for (const m of METRICS) {
+    const t = el("div", "tile");
+    t.append(el("div", "label", m.name));
+    const raw = d[m.key];
+    const val = el("div", "value");
+    if (raw === null || raw === undefined) {
+      val.textContent = "--";
+    } else {
+      const v = m.conv(raw);
+      val.textContent = fmt(m, v);
+      const b = band(m, v);
+      if (b) val.classList.add(b);
+    }
+    val.append(el("span", "unit", m.unit()));
+    t.append(val);
+    t.append(el("div", "note", m.warm && d[m.warm] ? "warming up" : ""));
+    box.append(t);
+  }
+  const b = el("div", "tile");
+  b.append(el("div", "label", "Battery"));
+  const bv = el("div", "value", d.batt_pct === null ? "--" : d.batt_pct.toFixed(0));
+  bv.append(el("span", "unit", "%"));
+  b.append(bv);
+  b.append(el("div", "note", d.batt_v === null ? "" : d.batt_v.toFixed(2) + " V"));
+  box.append(b);
+}
+
+// ---- charts (SVG) ----
+
+const SVGNS = "http://www.w3.org/2000/svg";
+const svgEl = (tag, attrs) => {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+};
+
+function timeLabel(t, spanS) {
+  const d = new Date(t * 1000);
+  if (spanS <= 2 * 86400) {
+    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+// pts: [[t (unix s), v (display units) or null], ...]; gap: max seconds between joined points
+function drawChart(container, m, pts, x0, x1, gap) {
+  const card = el("div", "chart");
+  const head = el("div", "head");
+  head.append(el("span", "name", m.name + " (" + m.unit() + ")"));
+  const range = el("span", "range");
+  head.append(range);
+  card.append(head);
+  container.append(card);
+
+  const vals = pts.filter(p => p[1] !== null);
+  if (vals.length === 0) {
+    card.append(el("div", "empty", "no data yet"));
+    return;
+  }
+
+  const ty = v => m.log ? Math.log10(Math.max(v, 0.1)) : v;
+  let lo = Math.min(...vals.map(p => ty(p[1])));
+  let hi = Math.max(...vals.map(p => ty(p[1])));
+  const minSpan = m.span();
+  if (hi - lo < minSpan) { const mid = (hi + lo) / 2; lo = mid - minSpan / 2; hi = mid + minSpan / 2; }
+  const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+
+  const vmin = Math.min(...vals.map(p => p[1])), vmax = Math.max(...vals.map(p => p[1]));
+  range.textContent = "min " + fmt(m, vmin) + " · max " + fmt(m, vmax);
+
+  const W = Math.max(card.clientWidth - 24, 200), H = 150, L = 44, R = 6, T = 8, B = 20;
+  const sx = t => L + (t - x0) / (x1 - x0) * (W - L - R);
+  const sy = v => T + (1 - (ty(v) - lo) / (hi - lo)) * (H - T - B);
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none" });
+
+  // y grid + labels (3 lines)
+  for (let i = 0; i <= 2; i++) {
+    const yv = lo + (hi - lo) * i / 2;
+    const y = T + (1 - i / 2) * (H - T - B);
+    svg.append(svgEl("line", { x1: L, x2: W - R, y1: y, y2: y, stroke: "var(--grid)" }));
+    const real = m.log ? Math.pow(10, yv) : yv;
+    const lab = svgEl("text", { x: L - 6, y: y + 4, "text-anchor": "end" });
+    lab.textContent = fmt(m, real);
+    svg.append(lab);
+  }
+  // x labels (4)
+  for (let i = 0; i <= 3; i++) {
+    const t = x0 + (x1 - x0) * i / 3;
+    const lab = svgEl("text", { x: sx(t), y: H - 4,
+      "text-anchor": i === 0 ? "start" : i === 3 ? "end" : "middle" });
+    lab.textContent = timeLabel(t, x1 - x0);
+    svg.append(lab);
+  }
+  // the line, broken at missing values and gaps
+  let d = "", prevT = null;
+  for (const [t, v] of pts) {
+    if (v === null) { prevT = null; continue; }
+    const cmd = prevT !== null && t - prevT <= gap ? "L" : "M";
+    d += `${cmd}${sx(t).toFixed(1)},${sy(v).toFixed(1)}`;
+    prevT = t;
+  }
+  svg.append(svgEl("path", { d, fill: "none", stroke: "var(--line)", "stroke-width": 2,
+    "stroke-linejoin": "round", "stroke-linecap": "round", "vector-effect": "non-scaling-stroke" }));
+  // single points (e.g. one hour of history) still show up
+  if (vals.length === 1) {
+    svg.append(svgEl("circle", { cx: sx(vals[0][0]), cy: sy(vals[0][1]), r: 3, fill: "var(--line)" }));
+  }
+  card.append(svg);
+}
+
+// ---- data ----
+
+const nowS = () => Date.now() / 1000;
+let lastRecent = null, lastHistory = null, days = 7;
+
+function renderRecent(d) {
+  const box = document.getElementById("recent");
+  box.replaceChildren();
+  const end = d.t || nowS();
+  for (const m of METRICS) {
+    const arr = d[m.key] || [];
+    const n = arr.length;
+    const pts = arr.map((v, i) => [end - (n - 1 - i) * d.period, v === null ? null : m.conv(v)]);
+    drawChart(box, m, pts, end - 6 * 3600, end, d.period * 1.5);
+  }
+}
+
+function renderHistory(d) {
+  const box = document.getElementById("history");
+  box.replaceChildren();
+  // keep the last record per hour (a re-written hour supersedes)
+  const byT = new Map();
+  for (const row of d.rows) byT.set(row[0], row);
+  const rows = [...byT.values()].sort((a, b) => a[0] - b[0]);
+  const end = nowS();
+  const start = days ? end - days * 86400 : (rows.length ? rows[0][0] : end - 86400);
+  METRICS.forEach((m, idx) => {
+    const col = d.fields.indexOf(m.key);
+    const pts = rows.map(r => [r[0], r[col] === null ? null : m.conv(r[col])]);
+    drawChart(box, m, pts, start, end, d.period * 1.5);
+  });
+}
+
+async function getJSON(path) {
+  const r = await fetch(path, { cache: "no-store" });
+  if (!r.ok) throw new Error(path + ": " + r.status);
+  return r.json();
+}
+
+function setStatus(text, offline) {
+  const s = document.getElementById("status");
+  s.textContent = text;
+  s.classList.toggle("offline", !!offline);
+}
+
+async function pollNow() {
+  try {
+    const d = await getJSON("/api/now");
+    US = d.us_units;
+    renderTiles(d);
+    const when = d.t ? new Date(d.t * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+                     : "clock not set yet";
+    setStatus("updated " + when + " · up " + Math.floor(d.uptime / 3600) + " h");
+  } catch (e) {
+    setStatus("offline — retrying", true);
+  }
+}
+
+async function pollRecent() {
+  try { lastRecent = await getJSON("/api/recent"); renderRecent(lastRecent); } catch (e) {}
+}
+
+async function pollHistory() {
+  const since = days ? Math.floor(nowS() - days * 86400) : 0;
+  try { lastHistory = await getJSON("/api/history?since=" + since); renderHistory(lastHistory); }
+  catch (e) {}
+}
+
+document.getElementById("ranges").addEventListener("click", ev => {
+  const b = ev.target.closest("button");
+  if (!b) return;
+  days = Number(b.dataset.days);
+  for (const x of document.querySelectorAll("#ranges button")) x.classList.toggle("on", x === b);
+  pollHistory();
+});
+
+// Redraw at the new width when the window is resized.
+let resizeTimer;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    if (lastRecent) renderRecent(lastRecent);
+    if (lastHistory) renderHistory(lastHistory);
+  }, 200);
+});
+
+(async () => {
+  await pollNow();          // learn the units first
+  pollRecent();
+  pollHistory();
+  setInterval(pollNow, 5000);
+  setInterval(pollRecent, 60000);
+  setInterval(pollHistory, 600000);
+})();
+</script>
+</body>
+</html>

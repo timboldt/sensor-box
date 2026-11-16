@@ -11,6 +11,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <zephyr/fs/fcb.h>
 #include <zephyr/toolchain.h>
 
 #include "readings.h"
@@ -58,5 +59,16 @@ void ltlog_add(const struct readings *r);
  * Returns the number of records visited, or a negative error.
  */
 int ltlog_walk(bool (*cb)(const struct ltlog_record *rec, void *arg), void *arg);
+
+/*
+ * Resumable iteration, for streaming the log out in pieces: zero-initialise
+ * a cursor, then call ltlog_next() until it returns -ENOENT (end). Returns 0
+ * with *rec filled, or a negative error.
+ */
+struct ltlog_cursor {
+	struct fcb_entry loc;
+};
+
+int ltlog_next(struct ltlog_cursor *c, struct ltlog_record *rec);
 
 #endif /* SENSOR_BOX_LTLOG_H_ */
