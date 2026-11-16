@@ -1,22 +1,24 @@
 # sensor-box
 
 Firmware for a small environmental monitor built on the Adafruit ESP32-C6 Feather.
-It reads a handful of I2C environmental sensors, shows live values and recent
-history on a TFT FeatherWing, and logs timestamped CSV to an SD card. A LAN web
-dashboard is planned for a later phase.
+It reads a handful of I2C environmental sensors and shows live values and recent
+history on a TFT FeatherWing. A LAN web dashboard is planned for a later phase.
 
 Built on [Zephyr RTOS](https://zephyrproject.org/).
 
 **Status:** early work in progress. All sensors are read and logged to the
-console; the display, SD logging and RTC are not yet implemented.
+console; the display is not yet implemented.
 
 ## Hardware
 
 - Adafruit ESP32-C6 Feather (STEMMA QT), with on-board MAX17048 battery gauge
-- Adafruit 2.4" 320x240 TFT FeatherWing (ILI9341) — display + microSD slot
-- Adafruit DS3231 Precision RTC FeatherWing
-- I2C sensors: PMSA003I (PM), BME280 (temp/humidity/pressure), TSL2591 (light),
-  SGP30 (eCO2/TVOC)
+- Adafruit 2.4" 320x240 TFT FeatherWing (ILI9341), on SPI. Its touch
+  controller and microSD slot are unused, but share the SPI bus, so their
+  chip-selects must be held inactive.
+- I2C sensors, daisy-chained over STEMMA QT: PMSA003I (PM), BME280
+  (temp/humidity/pressure), TSL2591 (light), SGP30 (eCO2/TVOC)
+
+No RTC: wall-clock time, when needed, will come from SNTP over Wi-Fi.
 
 ## Layout
 
