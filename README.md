@@ -25,9 +25,14 @@ yet implemented.
 - **SGP30 baseline:** the eCO2/TVOC sensor learns a clean-air baseline over
   ~12 h. The firmware saves it to flash (first after 12 h of uptime, then
   hourly) and restores it at boot, so a reboot doesn't restart the learning.
-  Reflashing keeps it. `sgp30 baseline [save|clear]` on the console shows,
-  saves or clears it. There's no clock, so a baseline is restored however
-  long the box was off (Sensirion suggests discarding ones over 7 days old).
+  Reflashing keeps it. Each save is timestamped, and at boot the baseline is
+  restored once the clock is set, unless it's over 7 days old (Sensirion's
+  limit); with no network for 2 minutes it's restored without the check.
+  `sgp30 baseline [save|clear]` on the console shows, saves or clears it.
+- **Long-term history:** every reading is averaged per clock hour and stored
+  in flash (128 KB, about 6 months, oldest dropped first), kept across
+  reboots and reflashes. `ltlog show [n]` lists the newest records (UTC),
+  `ltlog clear` erases them.
 - **Dark room:** the backlight switches off below 1 lux. A press of Boot
   turns it on for 30 s (that first press only wakes the screen).
 
@@ -55,6 +60,7 @@ No RTC: wall-clock time, when needed, will come from SNTP over Wi-Fi.
 | `src/baseline.c` | Saves/restores the SGP30 baseline in flash |
 | `src/wifi.c` | Joins the Wi-Fi network stored on the device |
 | `src/timesync.c` | Sets the clock (UTC) from SNTP once online, then every 6 h |
+| `src/ltlog.c` | Hourly long-term history in flash (FCB) |
 | `src/backlight.c` | Backlight on/off from ambient light |
 | `app.overlay` | Devicetree for the I2C sensors and the SPI display |
 | `prj.conf`, `Kconfig` | Application Kconfig and its app-specific options |

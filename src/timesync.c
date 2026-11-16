@@ -5,7 +5,7 @@
  *
  * The box has no RTC, so the clock is unknown until the first sync. A sync
  * runs as soon as the network gets an IPv4 address, then every RESYNC; a
- * failed attempt retries after RETRY. The result sets Zephyr's
+ * failed attempt retries after 10 s, doubling up to 5 min. The result sets Zephyr's
  * SYS_CLOCK_REALTIME, so `date get` on the shell shows it.
  *
  * Syncs run on their own work queue: an SNTP query can block for seconds,
@@ -33,7 +33,8 @@ LOG_MODULE_REGISTER(timesync, LOG_LEVEL_INF);
 
 #define QUERY_TIMEOUT_MS 5000
 #define RESYNC           K_HOURS(6)
-#define RETRY            K_SECONDS(60)
+#define RETRY_FIRST_S    10	/* doubles after each failure ... */
+#define RETRY_MAX_S      300	/* ... up to this */
 #define WQ_STACK_SIZE    3072
 #define WQ_PRIORITY      K_LOWEST_APPLICATION_THREAD_PRIO
 
@@ -41,6 +42,9 @@ static K_THREAD_STACK_DEFINE(wq_stack, WQ_STACK_SIZE);
 static struct k_work_q wq;
 static struct net_mgmt_event_callback ipv4_cb;
 static atomic_t valid;
+static uint32_t retry_s = RETRY_FIRST_S;	/* only touched on `wq` */
+
+static void schedule_retry(void);
 
 static void sync(struct k_work *work);
 static K_WORK_DELAYABLE_DEFINE(sync_work, sync);
@@ -53,9 +57,9 @@ static void sync(struct k_work *work)
 	int ret = sntp_simple(CONFIG_SENSOR_BOX_NTP_SERVER, QUERY_TIMEOUT_MS, &ts);
 
 	if (ret != 0) {
-		LOG_WRN("SNTP query to %s failed (%d); retrying", CONFIG_SENSOR_BOX_NTP_SERVER,
-			ret);
-		k_work_reschedule_for_queue(&wq, &sync_work, RETRY);
+		LOG_WRN("SNTP query to %s failed (%d); retrying in %u s",
+			CONFIG_SENSOR_BOX_NTP_SERVER, ret, retry_s);
+		schedule_retry();
 		return;
 	}
 
@@ -68,7 +72,7 @@ static void sync(struct k_work *work)
 	ret = sys_clock_settime(SYS_CLOCK_REALTIME, &tp);
 	if (ret != 0) {
 		LOG_ERR("setting the clock failed (%d)", ret);
-		k_work_reschedule_for_queue(&wq, &sync_work, RETRY);
+		schedule_retry();
 		return;
 	}
 
@@ -80,7 +84,14 @@ static void sync(struct k_work *work)
 	LOG_INF("clock set from %s: %s UTC", CONFIG_SENSOR_BOX_NTP_SERVER, buf);
 
 	atomic_set(&valid, 1);
+	retry_s = RETRY_FIRST_S;
 	k_work_reschedule_for_queue(&wq, &sync_work, RESYNC);
+}
+
+static void schedule_retry(void)
+{
+	k_work_reschedule_for_queue(&wq, &sync_work, K_SECONDS(retry_s));
+	retry_s = MIN(retry_s * 2, RETRY_MAX_S);
 }
 
 static void on_ipv4_event(struct net_mgmt_event_callback *cb, uint64_t event,

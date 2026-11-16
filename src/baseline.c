@@ -10,9 +10,12 @@
  *  - From then on the baseline is saved every SAVE_PERIOD (only if changed,
  *    to spare the flash).
  *
- * Sensirion also says to discard a baseline more than 7 days old. Without an
- * RTC or network time the box cannot tell how long it was off, so the saved
- * baseline is always restored. (With SNTP, store a timestamp alongside.)
+ * Sensirion also says to discard a baseline more than MAX_AGE (7 days) old.
+ * Each save records the UTC time (from SNTP), so the restore waits until the
+ * clock is set (~15 s after boot), then restores the baseline only if it is
+ * recent enough. If the clock isn't set within CLOCK_WAIT (no network), or
+ * the baseline was saved without a known time, it is restored anyway. The
+ * SGP30 accepts a baseline at any point after Init_air_quality.
  *
  * The baseline lives in the "storage" flash partition, which flashing the
  * firmware does not touch.
@@ -31,6 +34,8 @@
 
 #include <sensor_box/sgp30.h>
 
+#include "timesync.h"
+
 #include "baseline.h"
 
 LOG_MODULE_REGISTER(baseline, LOG_LEVEL_INF);
@@ -38,13 +43,19 @@ LOG_MODULE_REGISTER(baseline, LOG_LEVEL_INF);
 #define FIRST_SAVE_FRESH    K_HOURS(12)
 #define FIRST_SAVE_RESTORED K_HOURS(1)
 #define SAVE_PERIOD         K_HOURS(1)
+#define MAX_AGE_S           (7 * 24 * 3600)
+#define CLOCK_WAIT_MS       (120 * 1000)
 
 #define SETTINGS_KEY "sgp30/baseline"
 
 struct baseline {
 	uint16_t eco2;
 	uint16_t tvoc;
+	uint32_t saved_at;	/* UTC seconds, 0 = unknown */
 };
+
+/* Saves from before saved_at existed: just the two words. */
+#define LEGACY_SIZE 4
 
 static const struct device *const sgp30 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(sgp30));
 
@@ -52,6 +63,7 @@ static const struct device *const sgp30 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(sgp
 static K_MUTEX_DEFINE(lock);
 static struct baseline saved;
 static bool have_saved;
+static bool restore_decided;
 static int64_t next_save_ms;
 
 static int settings_set(const char *key, size_t len, settings_read_cb read_cb, void *cb_arg)
@@ -59,10 +71,11 @@ static int settings_set(const char *key, size_t len, settings_read_cb read_cb, v
 	if (strcmp(key, "baseline") != 0) {
 		return -ENOENT;
 	}
-	if (len != sizeof(saved)) {
+	if (len != sizeof(saved) && len != LEGACY_SIZE) {
 		return -EINVAL;
 	}
-	if (read_cb(cb_arg, &saved, sizeof(saved)) != sizeof(saved)) {
+	memset(&saved, 0, sizeof(saved));
+	if (read_cb(cb_arg, &saved, len) != (ssize_t)len) {
 		return -EIO;
 	}
 	have_saved = true;
@@ -102,6 +115,7 @@ static int save_now(void)
 		return 0;
 	}
 
+	cur.saved_at = timesync_valid() ? (uint32_t)timesync_now() : 0;
 	ret = settings_save_one(SETTINGS_KEY, &cur, sizeof(cur));
 	if (ret == 0) {
 		saved = cur;
@@ -128,26 +142,57 @@ void baseline_init(void)
 
 	k_mutex_lock(&lock, K_FOREVER);
 
-	k_timeout_t first_save = FIRST_SAVE_FRESH;
-
+	/* Fresh-start rule until (and unless) a saved baseline is restored. */
+	next_save_ms = k_uptime_get() + k_ticks_to_ms_floor64(FIRST_SAVE_FRESH.ticks);
 	if (have_saved) {
-		struct sensor_value v = { .val1 = saved.eco2, .val2 = saved.tvoc };
-
-		ret = sensor_attr_set(sgp30, SENSOR_CHAN_ALL,
-				      (enum sensor_attribute)SENSOR_ATTR_SGP30_BASELINE, &v);
-		if (ret == 0) {
-			LOG_INF("restoring saved: eCO2 0x%04x TVOC 0x%04x", saved.eco2,
-				saved.tvoc);
-			first_save = FIRST_SAVE_RESTORED;
-		} else {
-			LOG_WRN("restore failed: %d", ret);
-		}
+		LOG_INF("saved baseline found; restoring once the clock is set");
 	} else {
+		restore_decided = true;
 		LOG_INF("no saved baseline; first save after 12 h of operation");
 	}
-	next_save_ms = k_uptime_get() + k_ticks_to_ms_floor64(first_save.ticks);
 
 	k_mutex_unlock(&lock);
+}
+
+/* Restore or discard the saved baseline, once its age can be judged. Under `lock`. */
+static void decide_restore(void)
+{
+	bool clock = timesync_valid();
+
+	if (!have_saved) {
+		restore_decided = true;	/* cleared while waiting */
+		return;
+	}
+	if (!clock && k_uptime_get() < CLOCK_WAIT_MS) {
+		return;		/* keep waiting for SNTP */
+	}
+	restore_decided = true;
+
+	if (clock && saved.saved_at != 0) {
+		int64_t age = (int64_t)timesync_now() - saved.saved_at;
+
+		if (age > MAX_AGE_S) {
+			LOG_INF("saved baseline is %lld days old (limit 7); discarding",
+				age / 86400);
+			settings_delete(SETTINGS_KEY);
+			have_saved = false;
+			return;
+		}
+	} else {
+		LOG_INF("restoring without an age check (%s)",
+			clock ? "saved before the clock was known" : "clock not set");
+	}
+
+	struct sensor_value v = { .val1 = saved.eco2, .val2 = saved.tvoc };
+	int ret = sensor_attr_set(sgp30, SENSOR_CHAN_ALL,
+				  (enum sensor_attribute)SENSOR_ATTR_SGP30_BASELINE, &v);
+
+	if (ret == 0) {
+		LOG_INF("restoring saved: eCO2 0x%04x TVOC 0x%04x", saved.eco2, saved.tvoc);
+		next_save_ms = k_uptime_get() + k_ticks_to_ms_floor64(FIRST_SAVE_RESTORED.ticks);
+	} else {
+		LOG_WRN("restore failed: %d", ret);
+	}
 }
 
 void baseline_tick(void)
@@ -158,7 +203,10 @@ void baseline_tick(void)
 
 	k_mutex_lock(&lock, K_FOREVER);
 
-	if (k_uptime_get() >= next_save_ms) {
+	if (!restore_decided) {
+		decide_restore();
+	}
+	if (restore_decided && k_uptime_get() >= next_save_ms) {
 		int ret = save_now();
 
 		if (ret != 0) {
@@ -192,6 +240,7 @@ static int cmd_baseline(const struct shell *sh, size_t argc, char **argv)
 		if (ret == 0) {
 			/* Back to the fresh-start rule: don't save an unlearned one. */
 			have_saved = false;
+			restore_decided = true;
 			next_save_ms = k_uptime_get() +
 				       k_ticks_to_ms_floor64(FIRST_SAVE_FRESH.ticks);
 			shell_print(sh, "saved baseline cleared; reset the board to "
@@ -212,7 +261,12 @@ static int cmd_baseline(const struct shell *sh, size_t argc, char **argv)
 		shell_print(sh, "current: not read yet (first read ~1 min after boot)");
 	}
 	if (have_saved) {
-		shell_print(sh, "saved:   eCO2 0x%04x TVOC 0x%04x", saved.eco2, saved.tvoc);
+		shell_print(sh, "saved:   eCO2 0x%04x TVOC 0x%04x%s", saved.eco2, saved.tvoc,
+			    restore_decided ? "" : " (restore pending)");
+		if (saved.saved_at != 0 && timesync_valid()) {
+			shell_print(sh, "         %lld h old",
+				    ((int64_t)timesync_now() - saved.saved_at) / 3600);
+		}
 	} else {
 		shell_print(sh, "saved:   none");
 	}

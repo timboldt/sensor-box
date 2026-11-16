@@ -17,7 +17,8 @@
  * temp/RH is fed to the SGP30 as absolute humidity for its on-chip
  * compensation, and its IAQ baseline is saved to flash (baseline.c). Wi-Fi
  * connects to the network stored on the device (wifi.c), and the clock is
- * set from SNTP once it does (timesync.c).
+ * set from SNTP once it does (timesync.c). Hourly averages go to
+ * a long-term log in flash (ltlog.c).
  */
 
 #include <math.h>
@@ -35,6 +36,7 @@
 #include "backlight.h"
 #include "baseline.h"
 #include "history.h"
+#include "ltlog.h"
 #include "readings.h"
 #include "timesync.h"
 #include "ui.h"
@@ -284,6 +286,7 @@ int main(void)
 
 	backlight_init();
 	baseline_init();
+	ltlog_init();
 	timesync_init();
 	wifi_init();
 
@@ -305,6 +308,7 @@ int main(void)
 
 			backlight_set_ambient(r.light_ok, r.lux);
 			history_add(&r);
+			ltlog_add(&r);
 			baseline_tick();
 
 			if (have_ui) {
