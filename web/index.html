@@ -89,7 +89,7 @@ const METRICS = [
   { key: "temp",  name: "Temperature", unit: () => US ? "°F" : "°C",
     conv: v => US ? v * 9 / 5 + 32 : v, dec: 1, span: () => US ? 2 : 1 },
   { key: "rh",    name: "Humidity", unit: () => "%RH", conv: v => v, dec: 0, span: () => 5 },
-  { key: "press", name: "Pressure (sea level)", unit: () => US ? "inHg" : "hPa",
+  { key: "press", name: "Pressure (MSL)", unit: () => US ? "inHg" : "hPa",
     conv: v => US ? v / 33.8639 : v, dec: () => US ? 2 : 0, span: () => US ? 0.05 : 2 },
   { key: "pm25",  name: "PM2.5", unit: () => "µg/m³", conv: v => v, dec: 0, span: () => 10,
     bands: [9, 35, 55], warm: "pm_warming" },
@@ -135,13 +135,6 @@ function renderTiles(d) {
     t.append(el("div", "note", m.warm && d[m.warm] ? "warming up" : ""));
     box.append(t);
   }
-  const b = el("div", "tile");
-  b.append(el("div", "label", "Battery"));
-  const bv = el("div", "value", d.batt_pct === null ? "--" : d.batt_pct.toFixed(0));
-  bv.append(el("span", "unit", "%"));
-  b.append(bv);
-  b.append(el("div", "note", d.batt_v === null ? "" : d.batt_v.toFixed(2) + " V"));
-  box.append(b);
 }
 
 // ---- charts (SVG) ----
@@ -279,7 +272,8 @@ async function pollNow() {
     renderTiles(d);
     const when = d.t ? new Date(d.t * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
                      : "clock not set yet";
-    setStatus("updated " + when + " · up " + Math.floor(d.uptime / 3600) + " h");
+    const batt = d.batt_pct === null ? "" : " · battery " + d.batt_pct.toFixed(0) + "%";
+    setStatus("updated " + when + " · up " + Math.floor(d.uptime / 3600) + " h" + batt);
   } catch (e) {
     setStatus("offline — retrying", true);
   }
