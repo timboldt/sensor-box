@@ -17,4 +17,11 @@ config SENSOR_BOX_US_UNITS
 	  Show temperature in degrees F and pressure in inches of mercury on
 	  the TFT. Readings are kept, and logged, in metric either way.
 
+config SENSOR_BOX_NTP_SERVER
+	string "SNTP server"
+	default "pool.ntp.org"
+	help
+	  Time server queried once the network is up, then every 6 hours.
+	  An address with an optional :port, or a DNS name.
+
 source "Kconfig.zephyr"

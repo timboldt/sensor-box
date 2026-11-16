@@ -16,7 +16,8 @@
  * room. A missing device is logged and skipped, never fatal. The BME280
  * temp/RH is fed to the SGP30 as absolute humidity for its on-chip
  * compensation, and its IAQ baseline is saved to flash (baseline.c). Wi-Fi
- * connects to the network stored on the device (wifi.c).
+ * connects to the network stored on the device (wifi.c), and the clock is
+ * set from SNTP once it does (timesync.c).
  */
 
 #include <math.h>
@@ -35,6 +36,7 @@
 #include "baseline.h"
 #include "history.h"
 #include "readings.h"
+#include "timesync.h"
 #include "ui.h"
 #include "wifi.h"
 
@@ -282,6 +284,7 @@ int main(void)
 
 	backlight_init();
 	baseline_init();
+	timesync_init();
 	wifi_init();
 
 	uint32_t tick = 0;

@@ -8,7 +8,8 @@ Built on [Zephyr RTOS](https://zephyrproject.org/).
 
 **Status:** early work in progress. All sensors are read, logged to the
 console and shown live on the TFT with a 6-hour trend line per reading.
-It joins Wi-Fi; the web dashboard and network time are not yet implemented.
+It joins Wi-Fi and sets its clock (UTC) from SNTP; the web dashboard is not
+yet implemented.
 
 ## Using it
 
@@ -52,6 +53,7 @@ No RTC: wall-clock time, when needed, will come from SNTP over Wi-Fi.
 | `src/history.c` | 6-hour history (3-minute averages) for the trend lines |
 | `src/baseline.c` | Saves/restores the SGP30 baseline in flash |
 | `src/wifi.c` | Joins the Wi-Fi network stored on the device |
+| `src/timesync.c` | Sets the clock (UTC) from SNTP once online, then every 6 h |
 | `src/backlight.c` | Backlight on/off from ambient light |
 | `app.overlay` | Devicetree for the I2C sensors and the SPI display |
 | `prj.conf`, `Kconfig` | Application Kconfig and its app-specific options |
@@ -75,7 +77,8 @@ The box then joins it at every boot and logs its IP address; a Wi-Fi icon
 shows in the status bar while connected. The ESP32-C6 is 2.4 GHz only. The
 credentials are kept in the flash `storage` partition, so reflashing keeps
 them. `wifi cred list` / `wifi cred delete` manage them, and `wifi status`
-shows the connection.
+shows the connection. Once connected, the clock is set from SNTP (UTC); there
+is no RTC, so until then the time is unknown. `date get` shows it.
 
 ## Configuration
 
@@ -85,6 +88,7 @@ Site-specific settings live in `prj.conf` (defined in `Kconfig`):
 |--------|---------|
 | `CONFIG_SENSOR_BOX_ALTITUDE_M` | Altitude of the box in metres, for sea-level pressure |
 | `CONFIG_SENSOR_BOX_US_UNITS` | Show °F and inHg on the display (logs stay metric) |
+| `CONFIG_SENSOR_BOX_NTP_SERVER` | SNTP server (default `pool.ntp.org`) |
 
 ## Setup
 
