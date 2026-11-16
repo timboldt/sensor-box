@@ -656,8 +656,9 @@ void ui_update(const struct readings *r)
 				 : pct >= 15 ? LV_SYMBOL_BATTERY_1
 				 : LV_SYMBOL_BATTERY_EMPTY;
 
-		snprintf(buf, sizeof(buf), "%s%.2f V  %u%%  %s",
-			 r->wifi_ok ? LV_SYMBOL_WIFI "   " : "", r->batt_v, pct, icon);
+		/* No voltage here: it would run into the clock (it's in the log). */
+		snprintf(buf, sizeof(buf), "%s%u%%  %s", r->wifi_ok ? LV_SYMBOL_WIFI "   " : "",
+			 pct, icon);
 		lv_label_set_text(batt_label, buf);
 	} else {
 		lv_label_set_text(batt_label, r->wifi_ok ? LV_SYMBOL_WIFI "   " LV_SYMBOL_BATTERY_EMPTY
