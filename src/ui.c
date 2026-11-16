@@ -9,8 +9,8 @@
  *   | light                              battery |  status bar
  *   +--------------+--------------+--------------+
  *   | Temp         | Humidity     | Pressure     |
- *   |     21.4     |      64      |     1006     |
- *   |      C       |      %       |      hPa     |
+ *   |     70.5     |      64      |    30.07     |
+ *   |      F       |      %       |   inHg MSL   |
  *   +--------------+--------------+--------------+
  *   | PM2.5        | eCO2         | TVOC         |  values coloured by
  *   |       6      |     400      |       0      |  air-quality band
@@ -27,6 +27,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/display.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/util.h>
 
 #include <lvgl.h>
 #include <lvgl_zephyr.h>
@@ -67,9 +68,12 @@ static const struct {
 	const char *title;
 	const char *unit;
 } tile_def[T_COUNT] = {
-	[T_TEMP] = { "Temp", "\xc2\xb0" "C" },	/* degree sign, in Montserrat */
+	/* "\xc2\xb0" is the degree sign, which Montserrat includes. */
+	[T_TEMP] = { "Temp", IS_ENABLED(CONFIG_SENSOR_BOX_US_UNITS) ? "\xc2\xb0" "F"
+								    : "\xc2\xb0" "C" },
 	[T_RH] = { "Humidity", "%RH" },
-	[T_PRESS] = { "Pressure", "hPa" },
+	[T_PRESS] = { "Pressure", IS_ENABLED(CONFIG_SENSOR_BOX_US_UNITS) ? "inHg MSL"
+									 : "hPa MSL" },
 	[T_PM25] = { "PM2.5", "ug/m3" },
 	[T_ECO2] = { "eCO2", "ppm" },
 	[T_TVOC] = { "TVOC", "ppb" },
@@ -211,11 +215,20 @@ void ui_update(const struct readings *r)
 	lvgl_lock();
 
 	if (r->climate_ok) {
-		snprintf(buf, sizeof(buf), "%.1f", r->temp_c);
+		if (IS_ENABLED(CONFIG_SENSOR_BOX_US_UNITS)) {
+			snprintf(buf, sizeof(buf), "%.1f", r->temp_c * 9.0 / 5.0 + 32.0);
+		} else {
+			snprintf(buf, sizeof(buf), "%.1f", r->temp_c);
+		}
 		set_value(T_TEMP, buf, COL_TEXT);
 		snprintf(buf, sizeof(buf), "%.0f", r->rh_pct);
 		set_value(T_RH, buf, COL_TEXT);
-		snprintf(buf, sizeof(buf), "%.0f", r->press_hpa);
+		if (IS_ENABLED(CONFIG_SENSOR_BOX_US_UNITS)) {
+			/* 1 inHg = 33.8639 hPa */
+			snprintf(buf, sizeof(buf), "%.2f", r->press_sl_hpa / 33.8639);
+		} else {
+			snprintf(buf, sizeof(buf), "%.0f", r->press_sl_hpa);
+		}
 		set_value(T_PRESS, buf, COL_TEXT);
 	} else {
 		set_missing(T_TEMP);

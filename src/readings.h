@@ -15,7 +15,8 @@ struct readings {
 	bool climate_ok;
 	double temp_c;
 	double rh_pct;
-	double press_hpa;
+	double press_hpa;	/* station (absolute) pressure */
+	double press_sl_hpa;	/* adjusted to sea level */
 
 	/* TSL2591 */
 	bool light_ok;

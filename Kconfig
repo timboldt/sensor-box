@@ -1,0 +1,20 @@
+# Application Kconfig for sensor-box. Zephyr picks up "Kconfig" from the
+# application directory automatically; it must source Kconfig.zephyr.
+
+mainmenu "sensor-box"
+
+config SENSOR_BOX_ALTITUDE_M
+	int "Altitude of the box above sea level, in metres"
+	default 0
+	help
+	  Used to convert the BME280's absolute (station) pressure to the
+	  sea-level pressure that weather reports use. At 0, the two are the
+	  same. Near sea level, each 10 m adds roughly 1.2 hPa.
+
+config SENSOR_BOX_US_UNITS
+	bool "Show US units on the display"
+	help
+	  Show temperature in degrees F and pressure in inches of mercury on
+	  the TFT. Readings are kept, and logged, in metric either way.
+
+source "Kconfig.zephyr"

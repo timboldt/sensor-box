@@ -28,11 +28,20 @@ No RTC: wall-clock time, when needed, will come from SNTP over Wi-Fi.
 | `src/main.c` | Application: sensor loop |
 | `src/ui.c` | TFT dashboard (LVGL) |
 | `app.overlay` | Devicetree for the I2C sensors and the SPI display |
-| `prj.conf` | Application Kconfig |
+| `prj.conf`, `Kconfig` | Application Kconfig and its app-specific options |
 | `boards/adafruit/feather_esp32c6/` | Board definition (also holds the FeatherWing pin wiring) |
 | `drivers/sensor/` | Out-of-tree drivers for PMSA003I and SGP30 |
 | `dts/bindings/` | Devicetree bindings for those drivers |
 | `west.yml` | West manifest (pins the Zephyr version) |
+
+## Configuration
+
+Site-specific settings live in `prj.conf` (defined in `Kconfig`):
+
+| Option | Meaning |
+|--------|---------|
+| `CONFIG_SENSOR_BOX_ALTITUDE_M` | Altitude of the box in metres, for sea-level pressure |
+| `CONFIG_SENSOR_BOX_US_UNITS` | Show °F and inHg on the display (logs stay metric) |
 
 ## Setup
 

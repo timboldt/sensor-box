@@ -56,6 +56,18 @@ static double abs_humidity_g_m3(double t_c, double rh_pct)
 	return 216.7 * vp_hpa / (273.15 + t_c);
 }
 
+/*
+ * Station pressure -> sea-level pressure (hPa), for an altitude in metres and
+ * the current temperature in degC. Hypsometric formula with the standard
+ * lapse rate, as used for weather-report (QNH-style) pressure.
+ */
+static double sea_level_hpa(double station_hpa, double alt_m, double t_c)
+{
+	double lapse = 0.0065 * alt_m;
+
+	return station_hpa * pow(1.0 - lapse / (t_c + lapse + 273.15), -5.257);
+}
+
 /* Push absolute humidity to the SGP30 for on-chip compensation. */
 static void feed_sgp30_humidity(double temp_c, double rh_pct)
 {
@@ -93,14 +105,17 @@ static void report_bme280(struct readings *r)
 	double rh_pct = sensor_value_to_double(&humidity);
 
 	double press_hpa = sensor_value_to_double(&press) * 10.0;
+	double press_sl_hpa = sea_level_hpa(press_hpa, CONFIG_SENSOR_BOX_ALTITUDE_M, temp_c);
 
-	LOG_INF("bme280:  %.2f C  %.2f %%RH  %.2f hPa  (AH %.2f g/m3)",
-		temp_c, rh_pct, press_hpa, abs_humidity_g_m3(temp_c, rh_pct));
+	LOG_INF("bme280:  %.2f C  %.2f %%RH  %.2f hPa (%.2f hPa MSL)  (AH %.2f g/m3)",
+		temp_c, rh_pct, press_hpa, press_sl_hpa,
+		abs_humidity_g_m3(temp_c, rh_pct));
 
 	r->climate_ok = true;
 	r->temp_c = temp_c;
 	r->rh_pct = rh_pct;
 	r->press_hpa = press_hpa;
+	r->press_sl_hpa = press_sl_hpa;
 
 	feed_sgp30_humidity(temp_c, rh_pct);
 }
