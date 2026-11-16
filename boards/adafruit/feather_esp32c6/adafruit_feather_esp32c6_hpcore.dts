@@ -93,11 +93,19 @@
 	pinctrl-0 = <&spim2_default>;
 	pinctrl-names = "default";
 	/*
-	 * The 2.4" TFT FeatherWing puts the ILI9341 and the microSD slot on
-	 * this bus with separate GPIO chip-selects. Declare them in the
-	 * application overlay, e.g.:
-	 *   cs-gpios = <&gpio0 X GPIO_ACTIVE_LOW>,   // TFT_CS
-	 *              <&gpio0 Y GPIO_ACTIVE_LOW>;   // SD_CS
+	 * The 2.4" TFT FeatherWing puts the ILI9341, the microSD slot and the
+	 * STMPE610 touch controller on this bus with separate GPIO
+	 * chip-selects. FeatherWing wiring (silkscreen -> ESP32-C6 GPIO):
+	 *   TFT_CS   D9  -> IO7
+	 *   TFT_DC   D10 -> IO8   (data/command, not a CS)
+	 *   SD_CS    D5  -> IO5
+	 *   TOUCH_CS D6  -> IO6
+	 * Declare them in the application overlay, e.g.:
+	 *   cs-gpios = <&gpio0 7 GPIO_ACTIVE_LOW>,   // TFT_CS
+	 *              <&gpio0 5 GPIO_ACTIVE_LOW>,   // SD_CS
+	 *              <&gpio0 6 GPIO_ACTIVE_LOW>;   // TOUCH_CS
+	 * The SD card must be clocked at <= 400 kHz until its init handshake
+	 * completes.
 	 */
 };
 

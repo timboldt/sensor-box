@@ -9,6 +9,3 @@
 /test/
 /nrf/
 /build/
-
-# Old Rust firmware, kept for reference.
-/OLD-RUST/target/

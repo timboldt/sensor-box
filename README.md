@@ -5,31 +5,55 @@ It reads a handful of I2C environmental sensors, shows live values and recent
 history on a TFT FeatherWing, and logs timestamped CSV to an SD card. A LAN web
 dashboard is planned for a later phase.
 
-**Status:** early work in progress. See `.claude/plans/` for the build plan.
+Built on [Zephyr RTOS](https://zephyrproject.org/).
+
+**Status:** early work in progress. All sensors are read and logged to the
+console; the display, SD logging and RTC are not yet implemented.
 
 ## Hardware
 
-- Adafruit ESP32-C6 Feather (STEMMA QT)
+- Adafruit ESP32-C6 Feather (STEMMA QT), with on-board MAX17048 battery gauge
 - Adafruit 2.4" 320x240 TFT FeatherWing (ILI9341) — display + microSD slot
 - Adafruit DS3231 Precision RTC FeatherWing
 - I2C sensors: PMSA003I (PM), BME280 (temp/humidity/pressure), TSL2591 (light),
   SGP30 (eCO2/TVOC)
 
-## Toolchain
+## Layout
 
-Stable Rust (no nightly, no `build-std`); target `riscv32imac-unknown-none-elf`,
-installed automatically via `rust-toolchain.toml`. Flashing uses
-[`espflash`](https://github.com/esp-rs/espflash):
+| Path | Contents |
+|------|----------|
+| `src/main.c` | Application |
+| `app.overlay` | Devicetree for the devices on the I2C bus |
+| `prj.conf` | Application Kconfig |
+| `boards/adafruit/feather_esp32c6/` | Board definition (also holds the FeatherWing pin wiring) |
+| `drivers/sensor/` | Out-of-tree drivers for PMSA003I and SGP30 |
+| `dts/bindings/` | Devicetree bindings for those drivers |
+| `west.yml` | West manifest (pins the Zephyr version) |
+
+## Setup
+
+This repo is the west manifest repo. Clone it into an empty workspace
+directory, then let west fetch Zephyr and its modules next to it:
 
 ```sh
-cargo install espflash
+mkdir zephyr-ws && cd zephyr-ws
+git clone <this repo> sensor-box
+west init -l sensor-box
+west update
+west blobs fetch hal_espressif
 ```
 
-## Build & run
+You also need the Zephyr SDK and Python requirements; see Zephyr's
+[Getting Started Guide](https://docs.zephyrproject.org/latest/develop/getting_started/index.html).
+
+## Build & flash
+
+From `sensor-box/`:
 
 ```sh
-cargo build
-cargo run        # build, flash over USB, and open the serial monitor
+west build -b adafruit_feather_esp32c6/esp32c6/hpcore
+west flash
+west espressif monitor   # serial console + Zephyr shell
 ```
 
 ## License
