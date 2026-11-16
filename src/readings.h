@@ -22,8 +22,9 @@ struct readings {
 	bool light_ok;
 	double lux;
 
-	/* PMSA003I, ug/m3 */
+	/* PMSA003I, ug/m3. pm_warming: alive but still in its ~30 s warm-up. */
 	bool pm_ok;
+	bool pm_warming;
 	int32_t pm1_0;
 	int32_t pm2_5;
 	int32_t pm10;

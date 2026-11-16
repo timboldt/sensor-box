@@ -173,6 +173,20 @@ static float to_display(enum tile_id id, float v)
 	return v;
 }
 
+/* Whether a reading's sensor is still in its warm-up. */
+static bool warming(enum tile_id id, const struct readings *r)
+{
+	switch (id) {
+	case T_PM25:
+		return r->pm_warming;
+	case T_ECO2:
+	case T_TVOC:
+		return r->gas_warming;
+	default:
+		return false;
+	}
+}
+
 /* Current value of a tile, in display units. False if not available. */
 static bool current_value(enum tile_id id, const struct readings *r, float *v)
 {
@@ -519,7 +533,8 @@ static void render_chart_page(void)
 		lv_label_set_text_static(detail.y_max, "");
 		lv_label_set_text_static(detail.y_mid, "");
 		lv_label_set_text_static(detail.y_min, "");
-		lv_label_set_text_static(detail.note, "no data yet");
+		lv_label_set_text_static(detail.note,
+					 have_last && warming(id, &last) ? "warming up" : "no data yet");
 	}
 	lv_obj_align_to(detail.note, detail.chart, LV_ALIGN_CENTER, 0, 0);
 }
@@ -596,10 +611,9 @@ void ui_update(const struct readings *r)
 
 	for (int i = 0; i < T_TILES; i++) {
 		update_tile(i, r);
+		/* During a sensor's warm-up, say so where the trend line will be. */
+		lv_label_set_text_static(tiles[i].note, warming(i, r) ? "warming up" : "");
 	}
-	/* During SGP30 warm-up, say so where the trend line will be. */
-	lv_label_set_text_static(tiles[T_ECO2].note, r->gas_warming ? "warming up" : "");
-	lv_label_set_text_static(tiles[T_TVOC].note, r->gas_warming ? "warming up" : "");
 
 	if (page != 0) {
 		render_chart_page();

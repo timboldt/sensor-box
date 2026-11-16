@@ -28,12 +28,17 @@
  *   30   checksum (big-endian u16 = sum of bytes 0..29)
  *
  * All multi-byte values are big-endian.
+ *
+ * For CONFIG_PMSA003I_WARMUP_MS after init (fan spin-up), sample_fetch
+ * returns -EAGAIN without reading; callers should treat that as "warming up",
+ * not as an error.
  */
 
 #define DT_DRV_COMPAT plantower_pmsa003i
 
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/sensor.h>
+#include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/byteorder.h>
 
@@ -68,6 +73,7 @@ struct pmsa003i_data {
 	uint16_t pm_cf[3];   /* 1.0, 2.5, 10  CF=1 */
 	uint16_t pm_atm[3];  /* 1.0, 2.5, 10  atmospheric */
 	uint16_t count[6];   /* 0.3, 0.5, 1.0, 2.5, 5.0, 10 um */
+	int64_t ready_at_ms; /* end of warm-up, in uptime */
 };
 
 static int pmsa003i_sample_fetch(const struct device *dev, enum sensor_channel chan)
@@ -79,6 +85,10 @@ static int pmsa003i_sample_fetch(const struct device *dev, enum sensor_channel c
 
 	if (chan != SENSOR_CHAN_ALL) {
 		return -ENOTSUP;
+	}
+
+	if (k_uptime_get() < data->ready_at_ms) {
+		return -EAGAIN;
 	}
 
 	ret = i2c_read_dt(&cfg->i2c, buf, sizeof(buf));
@@ -178,6 +188,7 @@ static DEVICE_API(sensor, pmsa003i_api) = {
 static int pmsa003i_init(const struct device *dev)
 {
 	const struct pmsa003i_config *cfg = dev->config;
+	struct pmsa003i_data *data = dev->data;
 
 	if (!i2c_is_ready_dt(&cfg->i2c)) {
 		LOG_ERR("I2C bus not ready");
@@ -186,9 +197,10 @@ static int pmsa003i_init(const struct device *dev)
 
 	/*
 	 * The PMSA003I powers up in active mode streaming frames on its own;
-	 * no configuration write is required. The fan needs ~30 s to give
-	 * stable readings, but that is the application's concern, not init's.
+	 * no configuration write is required. Its fan needs time to spin up,
+	 * so hold off reading until the warm-up has passed.
 	 */
+	data->ready_at_ms = k_uptime_get() + CONFIG_PMSA003I_WARMUP_MS;
 	return 0;
 }
 

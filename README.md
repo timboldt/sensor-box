@@ -15,9 +15,11 @@ The web dashboard is not yet implemented.
 - The display shows a dashboard of current readings with 6-hour trends.
 - **Boot button:** press to page through a full-screen chart for each
   reading, plus light level (lux, on a log scale); after the last it returns
-  to the dashboard, and it also returns
-  on its own after a minute. Don't hold Boot while resetting or plugging in
-  (that enters the ESP32-C6 download mode).
+  to the dashboard, and it also returns on its own after a minute. Don't
+  hold Boot while resetting or plugging in (that enters the ESP32-C6
+  download mode).
+- **Warm-up:** PM2.5 shows "warming up" for the first 30 s after power-up
+  (fan spin-up), and eCO2/TVOC for the SGP30's first ~15 s.
 - **Dark room:** the backlight switches off below 1 lux. A press of Boot
   turns it on for 30 s (that first press only wakes the screen).
 

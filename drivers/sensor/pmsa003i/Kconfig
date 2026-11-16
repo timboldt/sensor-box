@@ -10,3 +10,13 @@ config PMSA003I
 	help
 	  Enable driver for the Plantower PMSA003I I2C particulate matter
 	  sensor (PM1.0 / PM2.5 / PM10 mass concentration and particle counts).
+
+config PMSA003I_WARMUP_MS
+	int "Warm-up time after power-up, in ms"
+	default 30000
+	depends on PMSA003I
+	help
+	  The PMSA003I's fan needs about 30 s after power-up before readings
+	  are stable, and reads in the first moments can fail outright. Until
+	  this long after driver init, sample_fetch returns -EAGAIN without
+	  touching the bus.

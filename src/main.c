@@ -184,8 +184,15 @@ static void report_pmsa003i(struct readings *r)
 		return;
 	}
 
-	if (sensor_sample_fetch(pmsa003i) != 0) {
-		LOG_WRN("pmsa003i: sample fetch failed");
+	int ret = sensor_sample_fetch(pmsa003i);
+
+	if (ret == -EAGAIN) {
+		LOG_INF("pmsa003i: warming up");
+		r->pm_warming = true;
+		return;
+	}
+	if (ret != 0) {
+		LOG_WRN("pmsa003i: sample fetch failed: %d", ret);
 		return;
 	}
 
