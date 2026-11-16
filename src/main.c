@@ -10,7 +10,7 @@
  *   - PMSA003I PM1.0 / 2.5 / 10             (sensor API, out-of-tree)
  *   - SGP30    eCO2 / TVOC                  (sensor API, out-of-tree)
  *   - MAX17048 battery voltage / charge     (fuel-gauge API)
- * plus the 1 Hz heartbeat + LED blink. A missing device is logged and
+ * and shows them on the TFT (ui.c), plus the 1 Hz heartbeat + LED blink. A missing device is logged and
  * skipped, never fatal. The BME280 temp/RH is fed to the SGP30 as
  * absolute humidity for its on-chip compensation.
  */
@@ -25,6 +25,9 @@
 #include <zephyr/logging/log.h>
 
 #include <sensor_box/sgp30.h>
+
+#include "readings.h"
+#include "ui.h"
 
 LOG_MODULE_REGISTER(sensor_box, LOG_LEVEL_INF);
 
@@ -67,7 +70,7 @@ static void feed_sgp30_humidity(double temp_c, double rh_pct)
 			(enum sensor_attribute)SENSOR_ATTR_SGP30_ABS_HUMIDITY, &ah);
 }
 
-static void report_bme280(void)
+static void report_bme280(struct readings *r)
 {
 	if (bme280 == NULL || !device_is_ready(bme280)) {
 		LOG_WRN("bme280: not ready, skipping");
@@ -89,14 +92,20 @@ static void report_bme280(void)
 	double temp_c = sensor_value_to_double(&temp);
 	double rh_pct = sensor_value_to_double(&humidity);
 
+	double press_hpa = sensor_value_to_double(&press) * 10.0;
+
 	LOG_INF("bme280:  %.2f C  %.2f %%RH  %.2f hPa  (AH %.2f g/m3)",
-		temp_c, rh_pct, sensor_value_to_double(&press) * 10.0,
-		abs_humidity_g_m3(temp_c, rh_pct));
+		temp_c, rh_pct, press_hpa, abs_humidity_g_m3(temp_c, rh_pct));
+
+	r->climate_ok = true;
+	r->temp_c = temp_c;
+	r->rh_pct = rh_pct;
+	r->press_hpa = press_hpa;
 
 	feed_sgp30_humidity(temp_c, rh_pct);
 }
 
-static void report_tsl2591(void)
+static void report_tsl2591(struct readings *r)
 {
 	if (tsl2591 == NULL || !device_is_ready(tsl2591)) {
 		LOG_WRN("tsl2591: not ready, skipping");
@@ -117,9 +126,12 @@ static void report_tsl2591(void)
 	LOG_INF("tsl2591: %.2f lux  (ir %.0f)",
 		sensor_value_to_double(&light),
 		sensor_value_to_double(&ir));
+
+	r->light_ok = true;
+	r->lux = sensor_value_to_double(&light);
 }
 
-static void report_max17048(void)
+static void report_max17048(struct readings *r)
 {
 	if (max17048 == NULL || !device_is_ready(max17048)) {
 		LOG_WRN("max17048: not ready, skipping");
@@ -138,9 +150,13 @@ static void report_max17048(void)
 	/* voltage is microvolts; relative_state_of_charge is whole percent. */
 	LOG_INF("battery: %.3f V  %u%%",
 		(double)v_uv.voltage / 1e6, soc_pct.relative_state_of_charge);
+
+	r->batt_ok = true;
+	r->batt_v = (double)v_uv.voltage / 1e6;
+	r->batt_pct = soc_pct.relative_state_of_charge;
 }
 
-static void report_pmsa003i(void)
+static void report_pmsa003i(struct readings *r)
 {
 	if (pmsa003i == NULL || !device_is_ready(pmsa003i)) {
 		LOG_WRN("pmsa003i: not ready, skipping");
@@ -160,9 +176,14 @@ static void report_pmsa003i(void)
 
 	LOG_INF("pmsa003i: PM1.0 %d  PM2.5 %d  PM10 %d  ug/m3",
 		pm1.val1, pm25.val1, pm10.val1);
+
+	r->pm_ok = true;
+	r->pm1_0 = pm1.val1;
+	r->pm2_5 = pm25.val1;
+	r->pm10 = pm10.val1;
 }
 
-static void report_sgp30(void)
+static void report_sgp30(struct readings *r)
 {
 	if (sgp30 == NULL || !device_is_ready(sgp30)) {
 		LOG_WRN("sgp30: not ready, skipping");
@@ -173,6 +194,7 @@ static void report_sgp30(void)
 
 	if (ret == -EAGAIN) {
 		LOG_INF("sgp30: warming up");
+		r->gas_warming = true;
 		return;
 	}
 	if (ret != 0) {
@@ -186,6 +208,10 @@ static void report_sgp30(void)
 	sensor_channel_get(sgp30, SENSOR_CHAN_VOC, &tvoc);
 
 	LOG_INF("sgp30:   eCO2 %d ppm  TVOC %d ppb", eco2.val1, tvoc.val1);
+
+	r->gas_ok = true;
+	r->eco2_ppm = eco2.val1;
+	r->tvoc_ppb = tvoc.val1;
 }
 
 int main(void)
@@ -197,18 +223,27 @@ int main(void)
 		LOG_ERR("LED GPIO not available");
 	}
 
+	/* A missing display is logged and skipped, like any other device. */
+	bool have_ui = ui_init() == 0;
+
 	uint32_t tick = 0;
 
 	while (1) {
 		gpio_pin_toggle_dt(&led);
 
 		if (tick % REPORT_EVERY_TICKS == 0) {
+			struct readings r = { 0 };
+
 			LOG_INF("--- tick %u ---", tick);
-			report_bme280();
-			report_tsl2591();
-			report_pmsa003i();
-			report_sgp30();
-			report_max17048();
+			report_bme280(&r);
+			report_tsl2591(&r);
+			report_pmsa003i(&r);
+			report_sgp30(&r);
+			report_max17048(&r);
+
+			if (have_ui) {
+				ui_update(&r);
+			}
 		}
 
 		tick++;

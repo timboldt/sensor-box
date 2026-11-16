@@ -6,8 +6,9 @@ history on a TFT FeatherWing. A LAN web dashboard is planned for a later phase.
 
 Built on [Zephyr RTOS](https://zephyrproject.org/).
 
-**Status:** early work in progress. All sensors are read and logged to the
-console; the display is not yet implemented.
+**Status:** early work in progress. All sensors are read, logged to the
+console and shown live on the TFT; history charts and the web dashboard are
+not yet implemented.
 
 ## Hardware
 
@@ -24,8 +25,9 @@ No RTC: wall-clock time, when needed, will come from SNTP over Wi-Fi.
 
 | Path | Contents |
 |------|----------|
-| `src/main.c` | Application |
-| `app.overlay` | Devicetree for the devices on the I2C bus |
+| `src/main.c` | Application: sensor loop |
+| `src/ui.c` | TFT dashboard (LVGL) |
+| `app.overlay` | Devicetree for the I2C sensors and the SPI display |
 | `prj.conf` | Application Kconfig |
 | `boards/adafruit/feather_esp32c6/` | Board definition (also holds the FeatherWing pin wiring) |
 | `drivers/sensor/` | Out-of-tree drivers for PMSA003I and SGP30 |

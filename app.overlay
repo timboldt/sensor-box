@@ -7,6 +7,78 @@
  */
 
 #include <zephyr/dt-bindings/i2c/i2c.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/display/panel.h>
+
+/ {
+	chosen {
+		zephyr,display = &tft;
+	};
+
+	/*
+	 * Adafruit 2.4" TFT FeatherWing: ILI9341 on SPI, with a GPIO
+	 * data/command line. Wiring is documented in the board DTS.
+	 */
+	tft_mipi_dbi: tft-mipi-dbi {
+		compatible = "zephyr,mipi-dbi-spi";
+		spi-dev = <&spi2>;
+		dc-gpios = <&gpio0 8 GPIO_ACTIVE_HIGH>;	/* D10 */
+		write-only;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		/*
+		 * The panel is an ILI9341, but driven as an ILI9340 (same
+		 * controller family). The ili9340 orientation table matches
+		 * Adafruit's library and Zephyr's in-tree Adafruit TFT shield;
+		 * the ili9341 one sets MADCTL differently (e.g. MV|MY at 90).
+		 * 270 = MADCTL MV|MX|MY, which is the right way up with the
+		 * FeatherWing as mounted in the box.
+		 */
+		tft: ili9340@0 {
+			compatible = "ilitek,ili9340";
+			reg = <0>;
+			mipi-max-frequency = <24000000>;
+			/*
+			 * Native (portrait) panel size. The driver swaps these
+			 * itself for 90/270, giving a 320x240 landscape screen.
+			 */
+			width = <240>;
+			height = <320>;
+			rotation = <270>;
+			/*
+			 * RGB888 rather than RGB565: LVGL 9 renders RGB565
+			 * little-endian and nothing in the Zephyr display path
+			 * byte-swaps it for the panel, so 565 colours come out
+			 * garbled. Same choice as Zephyr's Adafruit TFT shield.
+			 */
+			pixel-format = <PANEL_PIXEL_FORMAT_RGB_888>;
+		};
+	};
+};
+
+&spi2 {
+	cs-gpios = <&gpio0 7 GPIO_ACTIVE_LOW>;	/* D9: TFT_CS */
+};
+
+&gpio0 {
+	/*
+	 * The FeatherWing's microSD slot and STMPE610 touch controller share
+	 * the SPI bus but are unused. Hold their chip-selects inactive (high)
+	 * so they never drive MISO.
+	 */
+	sd-cs-hog {
+		gpio-hog;
+		gpios = <5 GPIO_ACTIVE_LOW>;	/* D5: SD_CS */
+		output-low;
+	};
+
+	touch-cs-hog {
+		gpio-hog;
+		gpios = <6 GPIO_ACTIVE_LOW>;	/* D6: TOUCH_CS */
+		output-low;
+	};
+};
 
 &i2c0 {
 	/*
