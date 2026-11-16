@@ -97,6 +97,18 @@ west flash
 west espressif monitor   # serial console + Zephyr shell
 ```
 
+Helpers that use `.venv` without activating it and find the board's port
+(`/dev/cu.usbmodem*`, or `ESP_PORT`) on their own:
+
+```sh
+scripts/flash.sh                                     # west flash
+.venv/bin/python scripts/console.py "kernel uptime"   # run shell commands
+.venv/bin/python scripts/console.py --watch 30        # watch the log
+```
+
+`console.py` leaves the board running; some ways of opening the ESP32-C6's
+USB serial port reset it.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
