@@ -15,7 +15,7 @@
  * button pages through full-screen charts, and wakes the screen in a dark
  * room. A missing device is logged and skipped, never fatal. The BME280
  * temp/RH is fed to the SGP30 as absolute humidity for its on-chip
- * compensation.
+ * compensation, and its IAQ baseline is saved to flash (baseline.c).
  */
 
 #include <math.h>
@@ -31,6 +31,7 @@
 #include <sensor_box/sgp30.h>
 
 #include "backlight.h"
+#include "baseline.h"
 #include "history.h"
 #include "readings.h"
 #include "ui.h"
@@ -278,6 +279,7 @@ int main(void)
 	bool have_ui = ui_init() == 0;
 
 	backlight_init();
+	baseline_init();
 
 	uint32_t tick = 0;
 
@@ -296,6 +298,7 @@ int main(void)
 
 			backlight_set_ambient(r.light_ok, r.lux);
 			history_add(&r);
+			baseline_tick();
 
 			if (have_ui) {
 				ui_update(&r);

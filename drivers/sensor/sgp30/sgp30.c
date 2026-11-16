@@ -16,6 +16,11 @@
  * For ~15 s after power-up the sensor returns a fixed 400 ppm / 0 ppb while
  * it warms up; that is expected, not an error.
  *
+ * The IAQ baseline (SENSOR_ATTR_SGP30_BASELINE) is also handled in the work
+ * handler, so its commands never collide with a measurement: a baseline set
+ * by the application is sent before the next measurement, and the current
+ * baseline is read back once a minute for sensor_attr_get().
+ *
  * I2C wire format: every command is a big-endian u16; every returned data
  * word is 2 bytes followed by a CRC-8 (poly 0x31, init 0xFF).
  */
@@ -39,6 +44,8 @@ LOG_MODULE_REGISTER(SGP30, CONFIG_SENSOR_LOG_LEVEL);
 #define SGP30_CMD_IAQ_MEASURE    0x2008
 #define SGP30_CMD_SET_HUMIDITY   0x2061
 #define SGP30_CMD_GET_FEATURESET 0x202F
+#define SGP30_CMD_GET_BASELINE   0x2015
+#define SGP30_CMD_SET_BASELINE   0x201E
 
 /* Sentinel meaning "no humidity value has been pushed by attr_set yet". */
 #define SGP30_AH_UNSET           UINT32_MAX
@@ -50,6 +57,10 @@ LOG_MODULE_REGISTER(SGP30, CONFIG_SENSOR_LOG_LEVEL);
 #define SGP30_INIT_WAIT_MS       10
 #define SGP30_MEASURE_WAIT_MS    12
 #define SGP30_MEASURE_PERIOD     K_SECONDS(1)
+#define SGP30_BASELINE_WAIT_MS   10
+
+/* Read the baseline back every this many measurement cycles. */
+#define SGP30_BASELINE_READ_EVERY 60
 
 struct sgp30_config {
 	struct i2c_dt_spec i2c;
@@ -69,6 +80,14 @@ struct sgp30_data {
 	 */
 	atomic_t abs_humidity_8_8;
 	uint16_t ah_last_sent;   /* work-handler-private */
+
+	/* Baseline, shared between the work handler and attr_get/attr_set. */
+	struct k_spinlock lock;
+	bool baseline_pending;       /* set_baseline queued by attr_set */
+	uint16_t pending_eco2, pending_tvoc;
+	bool baseline_valid;         /* read back at least once */
+	uint16_t baseline_eco2, baseline_tvoc;
+	unsigned int cycles;         /* work-handler-private */
 };
 
 static uint8_t sgp30_crc(const uint8_t *data)
@@ -128,6 +147,66 @@ static int sgp30_send_humidity(const struct device *dev, uint16_t ah_8_8)
 	return i2c_write_dt(&cfg->i2c, buf, sizeof(buf));
 }
 
+/* Send Set_baseline. Note the order: TVOC word first, then eCO2. */
+static int sgp30_send_baseline(const struct device *dev, uint16_t eco2, uint16_t tvoc)
+{
+	const struct sgp30_config *cfg = dev->config;
+	uint8_t buf[8];
+
+	sys_put_be16(SGP30_CMD_SET_BASELINE, buf);
+	sys_put_be16(tvoc, &buf[2]);
+	buf[4] = sgp30_crc(&buf[2]);
+	sys_put_be16(eco2, &buf[5]);
+	buf[7] = sgp30_crc(&buf[5]);
+
+	return i2c_write_dt(&cfg->i2c, buf, sizeof(buf));
+}
+
+/* Restore a queued baseline, if any. Work-handler context. */
+static void sgp30_restore_baseline(struct sgp30_data *data)
+{
+	k_spinlock_key_t key = k_spin_lock(&data->lock);
+	bool pending = data->baseline_pending;
+	uint16_t eco2 = data->pending_eco2;
+	uint16_t tvoc = data->pending_tvoc;
+
+	data->baseline_pending = false;
+	k_spin_unlock(&data->lock, key);
+
+	if (!pending) {
+		return;
+	}
+	if (sgp30_send_baseline(data->dev, eco2, tvoc) == 0) {
+		LOG_INF("baseline restored: eCO2 0x%04x TVOC 0x%04x", eco2, tvoc);
+		k_sleep(K_MSEC(SGP30_BASELINE_WAIT_MS));
+	} else {
+		LOG_WRN("Set_baseline failed");
+	}
+}
+
+/* Read the current baseline into the cache. Work-handler context. */
+static void sgp30_read_baseline(struct sgp30_data *data)
+{
+	uint16_t words[2];
+
+	if (sgp30_send_cmd(data->dev, SGP30_CMD_GET_BASELINE) < 0) {
+		LOG_WRN("Get_baseline command failed");
+		return;
+	}
+	k_sleep(K_MSEC(SGP30_BASELINE_WAIT_MS));
+	if (sgp30_read_words(data->dev, words, 2) < 0) {
+		LOG_WRN("Get_baseline read failed");
+		return;
+	}
+
+	k_spinlock_key_t key = k_spin_lock(&data->lock);
+
+	data->baseline_eco2 = words[0];
+	data->baseline_tvoc = words[1];
+	data->baseline_valid = true;
+	k_spin_unlock(&data->lock, key);
+}
+
 static void sgp30_measure_work(struct k_work *work)
 {
 	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
@@ -151,6 +230,8 @@ static void sgp30_measure_work(struct k_work *work)
 		}
 	}
 
+	sgp30_restore_baseline(data);
+
 	ret = sgp30_send_cmd(dev, SGP30_CMD_IAQ_MEASURE);
 	if (ret < 0) {
 		LOG_WRN("measure command failed: %d", ret);
@@ -168,6 +249,10 @@ static void sgp30_measure_work(struct k_work *work)
 	data->eco2_ppm = words[0];
 	data->tvoc_ppb = words[1];
 	data->valid = true;
+
+	if (++data->cycles % SGP30_BASELINE_READ_EVERY == 0) {
+		sgp30_read_baseline(data);
+	}
 }
 
 static int sgp30_sample_fetch(const struct device *dev, enum sensor_channel chan)
@@ -209,6 +294,21 @@ static int sgp30_attr_set(const struct device *dev, enum sensor_channel chan,
 {
 	struct sgp30_data *data = dev->data;
 
+	if ((int)attr == SENSOR_ATTR_SGP30_BASELINE) {
+		if (val->val1 < 0 || val->val1 > UINT16_MAX ||
+		    val->val2 < 0 || val->val2 > UINT16_MAX) {
+			return -EINVAL;
+		}
+
+		k_spinlock_key_t key = k_spin_lock(&data->lock);
+
+		data->pending_eco2 = (uint16_t)val->val1;
+		data->pending_tvoc = (uint16_t)val->val2;
+		data->baseline_pending = true;
+		k_spin_unlock(&data->lock, key);
+		return 0;
+	}
+
 	if ((int)attr != SENSOR_ATTR_SGP30_ABS_HUMIDITY) {
 		return -ENOTSUP;
 	}
@@ -223,10 +323,33 @@ static int sgp30_attr_set(const struct device *dev, enum sensor_channel chan,
 	return 0;
 }
 
+static int sgp30_attr_get(const struct device *dev, enum sensor_channel chan,
+			  enum sensor_attribute attr, struct sensor_value *val)
+{
+	struct sgp30_data *data = dev->data;
+	int ret = 0;
+
+	if ((int)attr != SENSOR_ATTR_SGP30_BASELINE) {
+		return -ENOTSUP;
+	}
+
+	k_spinlock_key_t key = k_spin_lock(&data->lock);
+
+	if (data->baseline_valid) {
+		val->val1 = data->baseline_eco2;
+		val->val2 = data->baseline_tvoc;
+	} else {
+		ret = -EAGAIN;
+	}
+	k_spin_unlock(&data->lock, key);
+	return ret;
+}
+
 static DEVICE_API(sensor, sgp30_api) = {
 	.sample_fetch = sgp30_sample_fetch,
 	.channel_get = sgp30_channel_get,
 	.attr_set = sgp30_attr_set,
+	.attr_get = sgp30_attr_get,
 };
 
 static int sgp30_init(const struct device *dev)

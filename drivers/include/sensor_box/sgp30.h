@@ -26,6 +26,19 @@ enum sensor_attribute_sgp30 {
 	 * and only when it has changed.
 	 */
 	SENSOR_ATTR_SGP30_ABS_HUMIDITY = SENSOR_ATTR_PRIV_START,
+
+	/**
+	 * The sensor's IAQ baseline, as the raw words the SGP30 uses
+	 * (sensor_value: val1 = eCO2 baseline, val2 = TVOC baseline).
+	 *
+	 * sensor_attr_get() returns the latest baseline, which the driver reads
+	 * from the sensor once a minute (-EAGAIN until the first read).
+	 * sensor_attr_set() restores a saved baseline; the driver sends it
+	 * before its next measurement. Per Sensirion, save the baseline
+	 * periodically and restore it after Init_air_quality (i.e. soon after
+	 * boot), so the sensor need not relearn it from scratch.
+	 */
+	SENSOR_ATTR_SGP30_BASELINE,
 };
 
 #ifdef __cplusplus
