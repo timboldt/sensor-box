@@ -8,7 +8,7 @@ Built on [Zephyr RTOS](https://zephyrproject.org/).
 
 **Status:** early work in progress. All sensors are read, logged to the
 console and shown live on the TFT with a 6-hour trend line per reading.
-The web dashboard is not yet implemented.
+It joins Wi-Fi; the web dashboard and network time are not yet implemented.
 
 ## Using it
 
@@ -51,6 +51,7 @@ No RTC: wall-clock time, when needed, will come from SNTP over Wi-Fi.
 | `src/ui.c` | TFT dashboard (LVGL) |
 | `src/history.c` | 6-hour history (3-minute averages) for the trend lines |
 | `src/baseline.c` | Saves/restores the SGP30 baseline in flash |
+| `src/wifi.c` | Joins the Wi-Fi network stored on the device |
 | `src/backlight.c` | Backlight on/off from ambient light |
 | `app.overlay` | Devicetree for the I2C sensors and the SPI display |
 | `prj.conf`, `Kconfig` | Application Kconfig and its app-specific options |
@@ -58,6 +59,23 @@ No RTC: wall-clock time, when needed, will come from SNTP over Wi-Fi.
 | `drivers/sensor/` | Out-of-tree drivers for PMSA003I and SGP30 |
 | `dts/bindings/` | Devicetree bindings for those drivers |
 | `west.yml` | West manifest (pins the Zephyr version) |
+
+## Wi-Fi
+
+The Wi-Fi network is stored on the device, not in this repo or the build.
+Add it once from a serial terminal (e.g. `screen /dev/cu.usbmodem1101 115200`;
+quit with Ctrl-A K):
+
+```
+wifi cred add -s "YourSSID" -k 1 -p "YourPassword"    # -k 1 = WPA2; -k 3 = WPA3-only
+wifi cred auto_connect                                 # or just reset
+```
+
+The box then joins it at every boot and logs its IP address; a Wi-Fi icon
+shows in the status bar while connected. The ESP32-C6 is 2.4 GHz only. The
+credentials are kept in the flash `storage` partition, so reflashing keeps
+them. `wifi cred list` / `wifi cred delete` manage them, and `wifi status`
+shows the connection.
 
 ## Configuration
 

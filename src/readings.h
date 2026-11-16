@@ -35,6 +35,9 @@ struct readings {
 	int32_t eco2_ppm;
 	int32_t tvoc_ppb;
 
+	/* Network */
+	bool wifi_ok;
+
 	/* MAX17048 */
 	bool batt_ok;
 	double batt_v;

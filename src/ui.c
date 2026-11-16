@@ -7,7 +7,7 @@
  *
  * Dashboard (default):
  *   +--------------------------------------------+
- *   | light                              battery |  status bar (all pages)
+ *   | light                       wifi  battery |  status bar (all pages)
  *   +--------------+--------------+--------------+
  *   |     Temp     |   Humidity   |   Pressure   |  title
  *   |     70.5     |      64      |    30.07     |  current value
@@ -635,10 +635,13 @@ void ui_update(const struct readings *r)
 				 : pct >= 15 ? LV_SYMBOL_BATTERY_1
 				 : LV_SYMBOL_BATTERY_EMPTY;
 
-		snprintf(buf, sizeof(buf), "%.2f V  %u%%  %s", r->batt_v, pct, icon);
+		snprintf(buf, sizeof(buf), "%s%.2f V  %u%%  %s",
+			 r->wifi_ok ? LV_SYMBOL_WIFI "   " : "", r->batt_v, pct, icon);
 		lv_label_set_text(batt_label, buf);
 	} else {
-		lv_label_set_text_static(batt_label, LV_SYMBOL_BATTERY_EMPTY " --");
+		lv_label_set_text(batt_label, r->wifi_ok ? LV_SYMBOL_WIFI "   " LV_SYMBOL_BATTERY_EMPTY
+						      " --"
+						    : LV_SYMBOL_BATTERY_EMPTY " --");
 	}
 
 	lvgl_unlock();
