@@ -38,12 +38,22 @@ directory, then let west fetch Zephyr and its modules next to it:
 ```sh
 mkdir zephyr-ws && cd zephyr-ws
 git clone <this repo> sensor-box
-west init -l sensor-box
+cd sensor-box
+
+# Python env (uv-managed Python, so OS/Homebrew upgrades can't break it).
+uv venv --managed-python --python 3.13 .venv
+source .venv/bin/activate
+uv pip install west
+
+west init -l .
 west update
 west blobs fetch hal_espressif
+
+# Zephyr's requirements plus each module's (esptool, imgtool, ...).
+uv pip install $(west packages pip)
 ```
 
-You also need the Zephyr SDK and Python requirements; see Zephyr's
+You also need the Zephyr SDK; see Zephyr's
 [Getting Started Guide](https://docs.zephyrproject.org/latest/develop/getting_started/index.html).
 
 ## Build & flash
