@@ -16,6 +16,9 @@ not yet implemented.
 - Adafruit 2.4" 320x240 TFT FeatherWing (ILI9341), on SPI. Its touch
   controller and microSD slot are unused, but share the SPI bus, so their
   chip-selects must be held inactive.
+  - **Hand-wired mod:** the FeatherWing's LITE pad is soldered to Feather A5
+    (GPIO2), so the firmware can switch the backlight off when the room is
+    dark. Without that wire the backlight is always on.
 - I2C sensors, daisy-chained over STEMMA QT: PMSA003I (PM), BME280
   (temp/humidity/pressure), TSL2591 (light), SGP30 (eCO2/TVOC)
 
@@ -27,6 +30,7 @@ No RTC: wall-clock time, when needed, will come from SNTP over Wi-Fi.
 |------|----------|
 | `src/main.c` | Application: sensor loop |
 | `src/ui.c` | TFT dashboard (LVGL) |
+| `src/backlight.c` | Backlight on/off from ambient light |
 | `app.overlay` | Devicetree for the I2C sensors and the SPI display |
 | `prj.conf`, `Kconfig` | Application Kconfig and its app-specific options |
 | `boards/adafruit/feather_esp32c6/` | Board definition (also holds the FeatherWing pin wiring) |

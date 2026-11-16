@@ -10,9 +10,10 @@
  *   - PMSA003I PM1.0 / 2.5 / 10             (sensor API, out-of-tree)
  *   - SGP30    eCO2 / TVOC                  (sensor API, out-of-tree)
  *   - MAX17048 battery voltage / charge     (fuel-gauge API)
- * and shows them on the TFT (ui.c), plus the 1 Hz heartbeat + LED blink. A missing device is logged and
- * skipped, never fatal. The BME280 temp/RH is fed to the SGP30 as
- * absolute humidity for its on-chip compensation.
+ * and shows them on the TFT (ui.c), switching its backlight off when the room
+ * is dark (backlight.c), plus the 1 Hz heartbeat + LED blink. A missing
+ * device is logged and skipped, never fatal. The BME280 temp/RH is fed to
+ * the SGP30 as absolute humidity for its on-chip compensation.
  */
 
 #include <math.h>
@@ -26,6 +27,7 @@
 
 #include <sensor_box/sgp30.h>
 
+#include "backlight.h"
 #include "readings.h"
 #include "ui.h"
 
@@ -241,6 +243,8 @@ int main(void)
 	/* A missing display is logged and skipped, like any other device. */
 	bool have_ui = ui_init() == 0;
 
+	backlight_init();
+
 	uint32_t tick = 0;
 
 	while (1) {
@@ -255,6 +259,8 @@ int main(void)
 			report_pmsa003i(&r);
 			report_sgp30(&r);
 			report_max17048(&r);
+
+			backlight_set_ambient(r.light_ok, r.lux);
 
 			if (have_ui) {
 				ui_update(&r);

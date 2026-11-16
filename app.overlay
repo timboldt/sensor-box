@@ -9,6 +9,8 @@
 #include <zephyr/dt-bindings/i2c/i2c.h>
 #include <zephyr/dt-bindings/gpio/gpio.h>
 #include <zephyr/dt-bindings/display/panel.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
+#include <zephyr/dt-bindings/pinctrl/esp32c6-pinctrl.h>
 
 / {
 	chosen {
@@ -116,5 +118,44 @@
 	sgp30: sgp30@58 {
 		compatible = "sensirion,sgp30";
 		reg = <0x58>;
+	};
+};
+
+/*
+ * TFT backlight. The FeatherWing's LITE pad is not connected to any header
+ * pin from the factory; in this box it is hand-wired to Feather A5 (IO2).
+ * LITE high = backlight on, low = off, and it accepts PWM for dimming.
+ * Driven by LEDC channel 0.
+ */
+&pinctrl {
+	ledc0_backlight: ledc0_backlight {
+		group1 {
+			pinmux = <LEDC_CH0_GPIO2>;
+			output-enable;
+		};
+	};
+};
+
+&ledc0 {
+	pinctrl-0 = <&ledc0_backlight>;
+	pinctrl-names = "default";
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	channel0@0 {
+		reg = <0x0>;
+		timer = <0>;
+	};
+};
+
+/ {
+	backlight {
+		compatible = "pwm-leds";
+
+		/* 5 kHz: well above visible flicker. */
+		tft_backlight: tft-backlight {
+			pwms = <&ledc0 0 PWM_USEC(200) PWM_POLARITY_NORMAL>;
+		};
 	};
 };

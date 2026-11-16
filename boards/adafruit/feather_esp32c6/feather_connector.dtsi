@@ -5,18 +5,18 @@
  *
  * Adafruit Feather header nexus for the ESP32-C6 Feather.
  *
- * CONFIRMED from https://learn.adafruit.com/adafruit-esp32-c6-feather/pinouts :
- *   SCK  = IO21   MOSI = IO22   MISO = IO23
- *   RX   = IO17   TX   = IO16
- *   SDA  = IO19   SCL  = IO18
- *   A2   = IO6    A3   = IO5    (A2 shares IO6, A3 shares IO5)
- *   IO9 shared by Boot button + on-board NeoPixel
- *   Other digital pads broken out: IO0, IO7, IO8, IO12, IO15
- *
- * TODO: A0, A1, A4, A5 and the D4/D5/D6/D10..D13 header positions are not
- * spelled out in the Adafruit text pinout. Fill the remaining gpio-map rows
- * from the PrettyPins diagram / schematic before relying on feather_header.
- * sensor-box itself only uses feather_i2c and feather_spi, which are complete.
+ * Pin map from Adafruit's CircuitPython board definition
+ * (ports/espressif/boards/adafruit_feather_esp32c6_4mbflash_nopsram/pins.c),
+ * cross-checked against https://learn.adafruit.com/adafruit-esp32-c6-feather/pinouts
+ * and, for D5/D6/D9/D10, against the working TFT FeatherWing:
+ *   A0 = IO1   A1 = IO4   A2 = IO6   A3 = IO5   A4 = IO3   A5 = IO2
+ *   D5 = IO5   D6 = IO6   (shared with A3 / A2)
+ *   D9 = IO7   D10 = IO8  D11 = IO0  D12 = IO14  D13 = IO15 (red LED)
+ *   SCK = IO21  MOSI = IO22  MISO = IO23
+ *   RX  = IO17  TX   = IO16
+ *   SDA = IO19  SCL  = IO18
+ *   IO9 is the Boot button + on-board NeoPixel (and a strapping pin).
+ *   D4 is not broken out on this Feather.
  */
 
 / {
@@ -26,27 +26,27 @@
 		gpio-map-mask = <0xffffffff 0xffffffc0>;
 		gpio-map-pass-thru = <0 0x3f>;
 		gpio-map = <
-			/*  0  A0 */	/* TODO */
-			/*  1  A1 */	/* TODO */
+			0 0 &gpio0 1 0		/* A0  */
+			1 0 &gpio0 4 0		/* A1  */
 			2 0 &gpio0 6 0		/* A2  */
 			3 0 &gpio0 5 0		/* A3  */
-			/*  4  A4 */	/* TODO */
-			/*  5  A5 */	/* TODO */
+			4 0 &gpio0 3 0		/* A4  */
+			5 0 &gpio0 2 0		/* A5  */
 			6 0 &gpio0 21 0		/* SCK  */
 			7 0 &gpio0 22 0		/* MOSI */
 			8 0 &gpio0 23 0		/* MISO */
 			9 0 &gpio0 17 0		/* RX   */
 			10 0 &gpio0 16 0	/* TX   */
-			/* 11  D4 */	/* TODO */
+			/* 11  D4: not broken out */
 			12 0 &gpio0 19 0	/* SDA  */
 			13 0 &gpio0 18 0	/* SCL  */
-			/* 14  D5 */	/* TODO */
-			/* 15  D6 */	/* TODO */
-			16 0 &gpio0 9 0		/* D9 (also Boot btn / NeoPixel) */
-			/* 17  D10 */	/* TODO */
-			/* 18  D11 */	/* TODO */
-			/* 19  D12 */	/* TODO */
-			/* 20  D13 */	/* TODO */
+			14 0 &gpio0 5 0		/* D5  */
+			15 0 &gpio0 6 0		/* D6  */
+			16 0 &gpio0 7 0		/* D9  */
+			17 0 &gpio0 8 0		/* D10 */
+			18 0 &gpio0 0 0		/* D11 */
+			19 0 &gpio0 14 0	/* D12 */
+			20 0 &gpio0 15 0	/* D13 (red LED) */
 		>;
 	};
 };
