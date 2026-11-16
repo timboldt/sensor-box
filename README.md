@@ -13,7 +13,8 @@ yet implemented.
 
 ## Using it
 
-- The display shows a dashboard of current readings with 6-hour trends.
+- The display shows a dashboard of current readings with 6-hour trends, and
+  the local time once the clock has been set over the network.
 - **Boot button:** press to page through a full-screen chart for each
   reading, plus light level (lux, on a log scale); after the last it returns
   to the dashboard, and it also returns on its own after a minute. Don't
@@ -89,6 +90,8 @@ Site-specific settings live in `prj.conf` (defined in `Kconfig`):
 | `CONFIG_SENSOR_BOX_ALTITUDE_M` | Altitude of the box in metres, for sea-level pressure |
 | `CONFIG_SENSOR_BOX_US_UNITS` | Show °F and inHg on the display (logs stay metric) |
 | `CONFIG_SENSOR_BOX_NTP_SERVER` | SNTP server (default `pool.ntp.org`) |
+| `CONFIG_SENSOR_BOX_UTC_OFFSET_MIN` | Standard-time UTC offset for the on-screen clock (Pacific: -480) |
+| `CONFIG_SENSOR_BOX_US_DST` | Apply US daylight saving time to the on-screen clock |
 
 ## Setup
 

@@ -7,7 +7,7 @@
  *
  * Dashboard (default):
  *   +--------------------------------------------+
- *   | light                       wifi  battery |  status bar (all pages)
+ *   | light          9:41 PM      wifi  battery |  status bar (all pages)
  *   +--------------+--------------+--------------+
  *   |     Temp     |   Humidity   |   Pressure   |  title
  *   |     70.5     |      64      |    30.07     |  current value
@@ -57,6 +57,7 @@
 #include <lvgl_zephyr.h>
 
 #include "history.h"
+#include "timesync.h"
 #include "ui.h"
 
 LOG_MODULE_REGISTER(ui, LOG_LEVEL_INF);
@@ -136,6 +137,7 @@ struct tile {
 
 static struct tile tiles[T_TILES];
 static lv_obj_t *light_label;
+static lv_obj_t *clock_label;
 static lv_obj_t *batt_label;
 
 /* Pages. page 0 is the dashboard; page k (1..T_COUNT) charts tile k - 1. */
@@ -476,6 +478,8 @@ int ui_init(void)
 	lv_obj_align(light_label, LV_ALIGN_TOP_LEFT, GAP, (STATUS_H - 14) / 2);
 	batt_label = make_label(scr, &lv_font_montserrat_14, COL_MUTED);
 	lv_obj_align(batt_label, LV_ALIGN_TOP_RIGHT, -GAP, (STATUS_H - 14) / 2);
+	clock_label = make_label(scr, &lv_font_montserrat_14, COL_TEXT);
+	lv_obj_align(clock_label, LV_ALIGN_TOP_MID, 0, (STATUS_H - 14) / 2);
 
 	/* Dashboard: 3 x 2 grid of tiles under the status bar. */
 	dash_page = make_page(scr, scr_w, scr_h - STATUS_H);
@@ -617,6 +621,23 @@ void ui_update(const struct readings *r)
 
 	if (page != 0) {
 		render_chart_page();
+	}
+
+	/* Clock: blank until the first SNTP sync. 12-hour with US units. */
+	struct tm now;
+
+	if (timesync_local(&now)) {
+		if (US) {
+			int h12 = now.tm_hour % 12 == 0 ? 12 : now.tm_hour % 12;
+
+			snprintf(buf, sizeof(buf), "%d:%02d %s", h12, now.tm_min,
+				 now.tm_hour < 12 ? "AM" : "PM");
+		} else {
+			snprintf(buf, sizeof(buf), "%02d:%02d", now.tm_hour, now.tm_min);
+		}
+		lv_label_set_text(clock_label, buf);
+	} else {
+		lv_label_set_text_static(clock_label, "");
 	}
 
 	if (r->light_ok) {

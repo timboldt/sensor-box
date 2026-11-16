@@ -11,6 +11,10 @@
  * Syncs run on their own work queue: an SNTP query can block for seconds,
  * which would stall the system workqueue (the SGP30's 1 Hz measurement and
  * the backlight fades run there).
+ *
+ * Local time for the on-screen clock is a fixed offset plus, optionally,
+ * the US daylight-saving rule, computed here rather than relying on the C
+ * library's TZ support.
  */
 
 #include <time.h>
@@ -109,4 +113,58 @@ time_t timesync_now(void)
 
 	sys_clock_gettime(SYS_CLOCK_REALTIME, &tp);
 	return tp.tv_sec;
+}
+
+/* Days since 1970-01-01 for a proleptic Gregorian date (H. Hinnant's algorithm). */
+static int64_t days_from_civil(int64_t y, int m, int d)
+{
+	y -= m <= 2;
+	int64_t era = (y >= 0 ? y : y - 399) / 400;
+	int64_t yoe = y - era * 400;
+	int64_t doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+	int64_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+
+	return era * 146097 + doe - 719468;
+}
+
+/* Day number (as days_from_civil) of the n-th Sunday of a month. */
+static int64_t nth_sunday(int64_t y, int m, int n)
+{
+	int64_t first = days_from_civil(y, m, 1);
+	int64_t weekday = ((first % 7) + 7 + 4) % 7;	/* 1970-01-01 was a Thursday; 0 = Sun */
+
+	return first + (7 - weekday) % 7 + 7 * (n - 1);
+}
+
+/* Is US daylight saving time in effect at this UTC instant? */
+static bool us_dst(time_t utc)
+{
+	const int64_t std = (int64_t)CONFIG_SENSOR_BOX_UTC_OFFSET_MIN * 60;
+	struct tm tm;
+	time_t local_std = utc + std;
+
+	gmtime_r(&local_std, &tm);
+
+	int64_t year = tm.tm_year + 1900;
+	/* Starts 2:00 local standard time; ends 2:00 local daylight time. */
+	int64_t start = nth_sunday(year, 3, 2) * 86400 + 2 * 3600 - std;
+	int64_t end = nth_sunday(year, 11, 1) * 86400 + 2 * 3600 - (std + 3600);
+
+	return utc >= start && utc < end;
+}
+
+bool timesync_local(struct tm *tm)
+{
+	if (!timesync_valid()) {
+		return false;
+	}
+
+	time_t utc = timesync_now();
+	time_t local = utc + (time_t)CONFIG_SENSOR_BOX_UTC_OFFSET_MIN * 60;
+
+	if (IS_ENABLED(CONFIG_SENSOR_BOX_US_DST) && us_dst(utc)) {
+		local += 3600;
+	}
+	gmtime_r(&local, tm);
+	return true;
 }

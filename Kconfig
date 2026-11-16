@@ -24,4 +24,17 @@ config SENSOR_BOX_NTP_SERVER
 	  Time server queried once the network is up, then every 6 hours.
 	  An address with an optional :port, or a DNS name.
 
+config SENSOR_BOX_UTC_OFFSET_MIN
+	int "Local standard time offset from UTC, in minutes"
+	default 0
+	range -720 840
+	help
+	  For the on-screen clock. Pacific Standard Time is -480.
+
+config SENSOR_BOX_US_DST
+	bool "Apply US daylight saving time to the on-screen clock"
+	help
+	  Add an hour from 2:00 on the second Sunday in March until 2:00 on
+	  the first Sunday in November (local time), as in most of the US.
+
 source "Kconfig.zephyr"
