@@ -9,4 +9,4 @@ list(APPEND BOARD_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(sensor_box LANGUAGES C)
 
-target_sources(app PRIVATE src/main.c src/ui.c src/backlight.c)
+target_sources(app PRIVATE src/main.c src/ui.c src/backlight.c src/history.c)

@@ -28,6 +28,7 @@
 #include <sensor_box/sgp30.h>
 
 #include "backlight.h"
+#include "history.h"
 #include "readings.h"
 #include "ui.h"
 
@@ -261,6 +262,7 @@ int main(void)
 			report_max17048(&r);
 
 			backlight_set_ambient(r.light_ok, r.lux);
+			history_add(&r);
 
 			if (have_ui) {
 				ui_update(&r);

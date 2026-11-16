@@ -7,8 +7,9 @@ history on a TFT FeatherWing. A LAN web dashboard is planned for a later phase.
 Built on [Zephyr RTOS](https://zephyrproject.org/).
 
 **Status:** early work in progress. All sensors are read, logged to the
-console and shown live on the TFT; history charts and the web dashboard are
-not yet implemented.
+console and shown live on the TFT with a 6-hour trend line per reading.
+Full-screen chart pages (Boot button) and the web dashboard are not yet
+implemented.
 
 ## Hardware
 
@@ -30,6 +31,7 @@ No RTC: wall-clock time, when needed, will come from SNTP over Wi-Fi.
 |------|----------|
 | `src/main.c` | Application: sensor loop |
 | `src/ui.c` | TFT dashboard (LVGL) |
+| `src/history.c` | 6-hour history (3-minute averages) for the trend lines |
 | `src/backlight.c` | Backlight on/off from ambient light |
 | `app.overlay` | Devicetree for the I2C sensors and the SPI display |
 | `prj.conf`, `Kconfig` | Application Kconfig and its app-specific options |
