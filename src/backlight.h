@@ -19,4 +19,11 @@ int backlight_init(void);
  */
 void backlight_set_ambient(bool lux_ok, double lux);
 
+/*
+ * Turn the backlight on for a while (30 s) even if the room is dark, e.g. on
+ * a button press; each call restarts the timer. Returns true if the backlight
+ * was off (or fading off), so the caller can treat the press as "wake only".
+ */
+bool backlight_wake(void);
+
 #endif /* SENSOR_BOX_BACKLIGHT_H_ */

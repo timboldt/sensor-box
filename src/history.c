@@ -9,8 +9,8 @@
  * then scrolls in from the right. (This is invented data, chosen because a
  * flat "no change yet" line reads better than a mostly blank one.)
  *
- * Only the main thread calls in here (history_add from the sensor loop,
- * history_get from ui_update on the same thread), so there is no locking.
+ * history_add runs on the sensor loop; history_get also runs from the
+ * button handler (chart pages), so both take `lock`.
  */
 
 #include <math.h>
@@ -34,6 +34,8 @@ static int64_t bucket_start_ms;
 
 /* Whether each series has had its first valid reading (and been backfilled). */
 static bool seeded[H_COUNT];
+
+static K_MUTEX_DEFINE(lock);
 
 static void close_bucket(void)
 {
@@ -64,6 +66,8 @@ void history_add(const struct readings *r)
 {
 	int64_t now = k_uptime_get();
 
+	k_mutex_lock(&lock, K_FOREVER);
+
 	if (!bucket_open) {
 		/* Full-length history from the start; series stay NAN until seeded. */
 		for (int s = 0; s < H_COUNT; s++) {
@@ -85,10 +89,14 @@ void history_add(const struct readings *r)
 	add(H_PM25, r->pm_ok, r->pm2_5);
 	add(H_ECO2, r->gas_ok, r->eco2_ppm);
 	add(H_TVOC, r->gas_ok, r->tvoc_ppb);
+
+	k_mutex_unlock(&lock);
 }
 
 int history_get(enum history_series s, float *out, int max)
 {
+	k_mutex_lock(&lock, K_FOREVER);
+
 	bool partial = n[s] > 0;
 	int total = count + (partial ? 1 : 0);
 	int skip = MAX(0, total - max);
@@ -100,5 +108,7 @@ int history_get(enum history_series s, float *out, int max)
 	if (partial && k < max) {
 		out[k++] = (float)(sum[s] / n[s]);
 	}
+
+	k_mutex_unlock(&lock);
 	return k;
 }

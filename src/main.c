@@ -11,9 +11,11 @@
  *   - SGP30    eCO2 / TVOC                  (sensor API, out-of-tree)
  *   - MAX17048 battery voltage / charge     (fuel-gauge API)
  * and shows them on the TFT (ui.c), switching its backlight off when the room
- * is dark (backlight.c), plus the 1 Hz heartbeat + LED blink. A missing
- * device is logged and skipped, never fatal. The BME280 temp/RH is fed to
- * the SGP30 as absolute humidity for its on-chip compensation.
+ * is dark (backlight.c), plus the 1 Hz heartbeat + LED blink. The Boot
+ * button pages through full-screen charts, and wakes the screen in a dark
+ * room. A missing device is logged and skipped, never fatal. The BME280
+ * temp/RH is fed to the SGP30 as absolute humidity for its on-chip
+ * compensation.
  */
 
 #include <math.h>
@@ -23,6 +25,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/fuel_gauge.h>
+#include <zephyr/input/input.h>
 #include <zephyr/logging/log.h>
 
 #include <sensor_box/sgp30.h>
@@ -231,6 +234,29 @@ static void report_sgp30(struct readings *r)
 	r->eco2_ppm = eco2.val1;
 	r->tvoc_ppb = tvoc.val1;
 }
+
+/*
+ * Boot button (sw0, IO9). A press while the screen is dark only wakes it;
+ * otherwise it moves to the next page. Runs on the input thread.
+ */
+static void on_input(struct input_event *evt, void *user_data)
+{
+	ARG_UNUSED(user_data);
+
+	if (evt->type != INPUT_EV_KEY || evt->code != INPUT_KEY_0) {
+		return;
+	}
+	LOG_INF("button: %s", evt->value ? "pressed" : "released");
+	if (evt->value != 1) {
+		return;
+	}
+	if (backlight_wake()) {
+		return;
+	}
+	ui_next_page();
+}
+
+INPUT_CALLBACK_DEFINE(DEVICE_DT_GET(DT_PARENT(DT_ALIAS(sw0))), on_input, NULL);
 
 int main(void)
 {

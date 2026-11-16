@@ -8,8 +8,17 @@ Built on [Zephyr RTOS](https://zephyrproject.org/).
 
 **Status:** early work in progress. All sensors are read, logged to the
 console and shown live on the TFT with a 6-hour trend line per reading.
-Full-screen chart pages (Boot button) and the web dashboard are not yet
-implemented.
+The web dashboard is not yet implemented.
+
+## Using it
+
+- The display shows a dashboard of current readings with 6-hour trends.
+- **Boot button:** press to page through a full-screen chart for each
+  reading; after the last it returns to the dashboard, and it also returns
+  on its own after a minute. Don't hold Boot while resetting or plugging in
+  (that enters the ESP32-C6 download mode).
+- **Dark room:** the backlight switches off below 1 lux. A press of Boot
+  turns it on for 30 s (that first press only wakes the screen).
 
 ## Hardware
 
