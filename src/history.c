@@ -89,6 +89,7 @@ void history_add(const struct readings *r)
 	add(H_PM25, r->pm_ok, r->pm2_5);
 	add(H_ECO2, r->gas_ok, r->eco2_ppm);
 	add(H_TVOC, r->gas_ok, r->tvoc_ppb);
+	add(H_LUX, r->light_ok, r->lux);
 
 	k_mutex_unlock(&lock);
 }

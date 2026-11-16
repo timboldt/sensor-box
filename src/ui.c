@@ -18,7 +18,7 @@
  *   |  _/\___/\_   |  __/‾‾\__    |  ___/\___    |
  *   +--------------+--------------+--------------+
  *
- * Chart page, one per reading:
+ * Chart page, one per reading, plus one for light (lux, log scale):
  *   | Temperature                       70.5 °F  |
  *   |  72.0 +--------------------------------+   |
  *   |       |        ___/‾‾‾\___             |   |
@@ -98,6 +98,8 @@ enum tile_id {
 	T_PM25,
 	T_ECO2,
 	T_TVOC,
+	T_TILES,		/* the readings above have dashboard tiles */
+	T_LIGHT = T_TILES,	/* chart page only; lux is in the status bar */
 	T_COUNT,
 };
 
@@ -109,6 +111,7 @@ static const struct {
 	int decimals;
 	enum history_series series;
 	float min_span;			/* smallest trend y-range, display units */
+	bool log_scale;			/* chart log10(value); min_span in decades */
 } tile_def[T_COUNT] = {
 	[T_TEMP] = { "Temp", "Temperature", US ? "\xc2\xb0" "F" : "\xc2\xb0" "C",
 		     1, H_TEMP, US ? 2.0f : 1.0f },
@@ -118,7 +121,11 @@ static const struct {
 	[T_PM25] = { "PM2.5", "PM2.5", "ug/m3", 0, H_PM25, 10.0f },
 	[T_ECO2] = { "eCO2", "eCO2", "ppm", 0, H_ECO2, 200.0f },
 	[T_TVOC] = { "TVOC", "TVOC", "ppb", 0, H_TVOC, 50.0f },
+	[T_LIGHT] = { "Light", "Light (log scale)", "lux", 0, H_LUX, 1.0f, true },
 };
+
+/* Floor for log-scale charts: 0 lux (a dark room) plots as this. */
+#define LOG_FLOOR 0.1f
 
 struct tile {
 	lv_obj_t *value;
@@ -127,7 +134,7 @@ struct tile {
 	int32_t trend_vals[HISTORY_LEN];
 };
 
-static struct tile tiles[T_COUNT];
+static struct tile tiles[T_TILES];
 static lv_obj_t *light_label;
 static lv_obj_t *batt_label;
 
@@ -188,6 +195,9 @@ static bool current_value(enum tile_id id, const struct readings *r, float *v)
 	case T_TVOC:
 		*v = (float)r->tvoc_ppb;
 		return r->gas_ok;
+	case T_LIGHT:
+		*v = (float)r->lux;
+		return r->light_ok;
 	default:
 		return false;
 	}
@@ -225,13 +235,31 @@ static lv_color_t value_colour(enum tile_id id, float v)
 
 static void format(enum tile_id id, float v, char *buf, size_t len)
 {
-	snprintf(buf, len, "%.*f", tile_def[id].decimals, (double)v);
+	int decimals = tile_def[id].decimals;
+
+	if (id == T_LIGHT && v < 10.0f) {
+		decimals = 1;
+	}
+	snprintf(buf, len, "%.*f", decimals, (double)v);
+}
+
+/* Display value -> chart y (log10 for log-scale charts). */
+static float to_chart(enum tile_id id, float v)
+{
+	return tile_def[id].log_scale ? log10f(MAX(v, LOG_FLOOR)) : v;
+}
+
+/* Chart y -> display value, for axis labels. */
+static float from_chart(enum tile_id id, float y)
+{
+	return tile_def[id].log_scale ? powf(10.0f, y) : y;
 }
 
 /*
  * Load a tile's history into vals (HISTORY_LEN points, newest at the right)
  * and set the chart's y range to fit, with margin_frac headroom above and
- * below. Returns the y range in display units via lo/hi; false if no data.
+ * below. Returns the y range in chart units (see to_chart) via lo/hi;
+ * false if no data.
  */
 static bool fill_trend(enum tile_id id, lv_obj_t *chart, int32_t *vals, float margin_frac,
 		       float *lo_out, float *hi_out)
@@ -249,7 +277,7 @@ static bool fill_trend(enum tile_id id, lv_obj_t *chart, int32_t *vals, float ma
 		if (isnan(pts[i])) {
 			continue;
 		}
-		float v = to_display(id, pts[i]);
+		float v = to_chart(id, to_display(id, pts[i]));
 
 		lo = MIN(lo, v);
 		hi = MAX(hi, v);
@@ -441,7 +469,7 @@ int ui_init(void)
 	int32_t tile_w = (scr_w - 4 * GAP) / 3;
 	int32_t tile_h = (scr_h - STATUS_H - 2 * GAP) / 2;
 
-	for (int i = 0; i < T_COUNT; i++) {
+	for (int i = 0; i < T_TILES; i++) {
 		lv_obj_t *box = make_tile(dash_page, i, tile_w, tile_h);
 		int col = i % 3;
 		int row = i / 3;
@@ -480,11 +508,11 @@ static void render_chart_page(void)
 	}
 
 	if (fill_trend(id, detail.chart, detail.vals, 0.05f, &lo, &hi)) {
-		format(id, hi, buf, sizeof(buf));
+		format(id, from_chart(id, hi), buf, sizeof(buf));
 		lv_label_set_text(detail.y_max, buf);
-		format(id, (lo + hi) / 2.0f, buf, sizeof(buf));
+		format(id, from_chart(id, (lo + hi) / 2.0f), buf, sizeof(buf));
 		lv_label_set_text(detail.y_mid, buf);
-		format(id, lo, buf, sizeof(buf));
+		format(id, from_chart(id, lo), buf, sizeof(buf));
 		lv_label_set_text(detail.y_min, buf);
 		lv_label_set_text_static(detail.note, "");
 	} else {
@@ -566,7 +594,7 @@ void ui_update(const struct readings *r)
 	last = *r;
 	have_last = true;
 
-	for (int i = 0; i < T_COUNT; i++) {
+	for (int i = 0; i < T_TILES; i++) {
 		update_tile(i, r);
 	}
 	/* During SGP30 warm-up, say so where the trend line will be. */

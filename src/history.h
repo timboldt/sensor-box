@@ -28,6 +28,7 @@ enum history_series {
 	H_PM25,		/* ug/m3 */
 	H_ECO2,		/* ppm */
 	H_TVOC,		/* ppb */
+	H_LUX,		/* lux */
 	H_COUNT,
 };
 
