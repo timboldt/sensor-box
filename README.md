@@ -60,7 +60,7 @@ No RTC: wall-clock time, when needed, will come from SNTP over Wi-Fi.
 |------|----------|
 | `src/main.c` | Application: sensor loop |
 | `src/ui.c` | TFT dashboard (LVGL) |
-| `src/history.c` | 6-hour history (3-minute averages) for the trend lines |
+| `src/history.c` | 24-hour history (1-minute averages) and 15-minute history (10 s) for the trend lines and charts |
 | `src/baseline.c` | Saves/restores the SGP30 baseline in flash |
 | `src/wifi.c` | Joins the Wi-Fi network stored on the device |
 | `src/timesync.c` | Sets the clock (UTC) from SNTP once online, then every 6 h |
@@ -89,7 +89,7 @@ can also be used directly (values are metric; missing values are `null`):
 | Endpoint | Contents |
 |----------|----------|
 | `/api/now` | Current readings |
-| `/api/recent` | Last 6 hours, 3-minute averages, oldest first (`?window=short`: last 15 minutes, 10 s); includes `uptime`, since points before the last boot are a placeholder |
+| `/api/recent` | Last 24 hours, 1-minute averages, oldest first (`?points=N` for the last N; `?window=short`: last 15 minutes, 10 s); includes `uptime`, since points before the last boot are a placeholder, and `age`, how long ago the newest point ended |
 | `/api/history?since=<unix time>` | Hourly averages from flash |
 
 ## Wi-Fi

@@ -5,11 +5,12 @@
  *
  *   /                      the dashboard page (web/index.html, gzipped)
  *   /api/now               current readings
- *   /api/recent[?window=short]
- *                          the 6-hour RAM history (3-minute averages), or with
- *                          window=short the 15-minute one (10 s); points
- *                          from before "uptime" seconds ago are the boot-time
- *                          backfill, not measurements
+ *   /api/recent[?window=short][&points=N]
+ *                          the last N points of the 24-hour RAM history
+ *                          (1-minute averages), or with window=short the
+ *                          15-minute one (10 s); points from before "uptime"
+ *                          seconds ago are the boot-time backfill, not
+ *                          measurements
  *   /api/history?since=T   the long-term hourly log from flash, from UTC T on
  *
  * Values are metric; "us_units" in /api/now tells the page how to display
@@ -160,7 +161,9 @@ static int now_handler(struct http_client_ctx *client, enum http_transaction_sta
 	return respond_json(rsp, &j);
 }
 
-/* ---- /api/recent ---- */
+/* ---- /api/recent[?window=short][&points=N] (streamed in chunks) ---- */
+
+#define RECENT_POINTS_PER_CHUNK 240
 
 static int recent_handler(struct http_client_ctx *client, enum http_transaction_status status,
 			  const struct http_request_ctx *req, struct http_response_ctx *rsp,
@@ -169,46 +172,111 @@ static int recent_handler(struct http_client_ctx *client, enum http_transaction_
 	static const struct {
 		const char *name;
 		enum history_series s;
-		int decimals;
+		int decimals;		/* -1: 4 significant digits */
 	} series[] = {
 		{ "temp", H_TEMP, 2 }, { "rh", H_RH, 1 },     { "press", H_PRESS, 1 },
 		{ "pm25", H_PM25, 1 }, { "eco2", H_ECO2, 0 }, { "tvoc", H_TVOC, 0 },
-		{ "lux", H_LUX, 5 },
+		{ "lux", H_LUX, -1 },
 	};
-	static char buf[8192];
-	static float pts[HISTORY_LEN];
+	static char buf[RECENT_POINTS_PER_CHUNK * 12 + 256];
+	static float pts[RECENT_POINTS_PER_CHUNK];
+	/* Where the response has got to, between chunks. */
+	static bool started;
+	static enum history_window w;
+	static uint32_t first;		/* sequence number of the oldest point sent */
+	static int count;		/* points per series */
+	static size_t si;		/* series being sent */
+	static int pos;			/* next point of that series */
 	struct jbuf j = { buf, sizeof(buf), 0 };
 
+	if (status == HTTP_SERVER_TRANSACTION_ABORTED ||
+	    status == HTTP_SERVER_TRANSACTION_COMPLETE) {
+		started = false;
+		return 0;
+	}
 	if (status != HTTP_SERVER_REQUEST_DATA_FINAL) {
 		return 0;
 	}
 
-	/* "?window=short": the 15-minute window the screen's tiles use. */
-	char q[32] = "";
+	if (!started) {
+		/* First call: the query string (if any) is in req->data. */
+		char q[48] = "";
+		const char *p;
 
-	memcpy(q, req->data, MIN(req->data_len, sizeof(q) - 1));
-	bool short_window = strstr(q, "window=short") != NULL;
-	int len = short_window ? HISTORY_SHORT_LEN : HISTORY_LEN;
+		memcpy(q, req->data, MIN(req->data_len, sizeof(q) - 1));
+		w = strstr(q, "window=short") != NULL ? HW_SHORT : HW_LONG;
+		int len = w == HW_SHORT ? HISTORY_SHORT_LEN : HISTORY_LEN;
 
-	/* Points are oldest first, "period" seconds apart, the last one "now". */
-	/* uptime lets the page tell real points from the boot-time backfill. */
-	jprintf(&j, "{\"period\":%d,\"uptime\":%lld,\"t\":",
-		short_window ? HISTORY_SHORT_PERIOD_S : HISTORY_PERIOD_S, k_uptime_get() / 1000);
-	jnum(&j, timesync_valid(), (double)timesync_now(), 0);
-	for (size_t i = 0; i < ARRAY_SIZE(series); i++) {
-		int n = short_window ? history_get_short(series[i].s, pts, len)
-				     : history_get(series[i].s, pts, len);
+		p = strstr(q, "points=");
+		count = p ? CLAMP(atoi(p + 7), 1, len) : len;
 
-		jprintf(&j, ",\"%s\":[", series[i].name);
-		for (int k = 0; k < n; k++) {
-			jprintf(&j, k ? "," : "");
-			jnum(&j, !isnan(pts[k]), pts[k], series[i].decimals);
-		}
-		jprintf(&j, "]");
+		/*
+		 * Every series is read up to the same completed bucket, so they
+		 * line up even if a bucket closes while this is being sent.
+		 */
+		int64_t age_ms;
+		uint32_t end = history_snapshot(w, &age_ms);
+
+		count = MIN(count, (int)end);
+		first = end - count;
+		si = 0;
+		pos = 0;
+		started = true;
+
+		rsp->status = HTTP_200_OK;
+		rsp->headers = json_headers;
+		rsp->header_count = ARRAY_SIZE(json_headers);
+		/*
+		 * Points are oldest first, "period" seconds apart; the last one
+		 * ended "age" seconds before "t". "uptime" lets the page tell real
+		 * points from the boot-time backfill.
+		 */
+		jprintf(&j, "{\"period\":%d,\"uptime\":%lld,\"age\":%lld,\"t\":",
+			w == HW_SHORT ? HISTORY_SHORT_PERIOD_S : HISTORY_PERIOD_S,
+			k_uptime_get() / 1000, age_ms / 1000);
+		jnum(&j, timesync_valid(), (double)timesync_now(), 0);
 	}
-	jprintf(&j, "}");
 
-	return respond_json(rsp, &j);
+	/* Up to one chunk's worth of points, across series boundaries. */
+	int sent = 0;
+
+	while (si < ARRAY_SIZE(series) && sent < RECENT_POINTS_PER_CHUNK) {
+		if (pos == 0) {
+			jprintf(&j, ",\"%s\":[", series[si].name);
+		}
+		int n = MIN(count - pos, RECENT_POINTS_PER_CHUNK - sent);
+
+		history_get_seq(w, series[si].s, first + pos, n, pts);
+		for (int k = 0; k < n; k++) {
+			jprintf(&j, pos + k ? "," : "");
+			if (series[si].decimals < 0) {
+				jprintf(&j, isnan(pts[k]) ? "null" : "%.4g", (double)pts[k]);
+			} else {
+				jnum(&j, true, pts[k], series[si].decimals);
+			}
+		}
+		pos += n;
+		sent += n;
+		if (pos >= count) {
+			jprintf(&j, "]");
+			si++;
+			pos = 0;
+		}
+	}
+	bool done = si >= ARRAY_SIZE(series);
+
+	if (done) {
+		jprintf(&j, "}");
+	}
+	if (j.len >= j.size) {
+		LOG_ERR("recent chunk truncated");
+		return -ENOMEM;
+	}
+
+	rsp->body = (const uint8_t *)buf;
+	rsp->body_len = j.len;
+	rsp->final_chunk = done;
+	return 0;
 }
 
 /* ---- /api/history?since=T (streamed in chunks) ---- */

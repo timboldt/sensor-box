@@ -131,11 +131,19 @@ static const struct {
 /* Floor for log-scale charts: 0 lux (a dark room) plots as this. */
 #define LOG_FLOOR 0.1f
 
+/*
+ * Chart pages show the last 6 hours: the 1-minute history averaged in threes,
+ * 120 points across the chart (more than that would be denser than pixels).
+ */
+#define CHART_GROUP  3
+#define CHART_POINTS 120
+#define CHART_HOURS  (CHART_POINTS * CHART_GROUP * HISTORY_PERIOD_S / 3600)
+
 struct tile {
 	lv_obj_t *value;
 	lv_obj_t *trend;
 	lv_obj_t *note;		/* shown over the trend area, e.g. "warming up" */
-	int32_t trend_vals[HISTORY_LEN];
+	int32_t trend_vals[HISTORY_SHORT_LEN];
 };
 
 static struct tile tiles[T_TILES];
@@ -156,7 +164,7 @@ static struct {
 	lv_obj_t *y_mid;
 	lv_obj_t *y_min;
 	lv_obj_t *note;
-	int32_t vals[HISTORY_LEN];
+	int32_t vals[CHART_POINTS];
 } detail;
 
 /* The latest readings, so a chart page can show the current value at once. */
@@ -285,7 +293,8 @@ static int cmp_float(const void *a, const void *b)
 }
 
 /*
- * Load a tile's history into vals (HISTORY_LEN points, newest at the right)
+ * Load a tile's history into vals (HISTORY_SHORT_LEN points from the short
+ * window, or CHART_POINTS from the long one; newest at the right)
  * and set the chart's y range to fit, with margin_frac headroom above and
  * below. Returns the y range in chart units (see to_chart) via lo/hi;
  * false if no data.
@@ -293,12 +302,12 @@ static int cmp_float(const void *a, const void *b)
 static bool fill_trend(enum tile_id id, lv_obj_t *chart, int32_t *vals, bool short_window,
 		       float margin_frac, float *lo_out, float *hi_out)
 {
-	static float pts[HISTORY_LEN];	/* only used under lvgl_lock */
-	static float sorted[HISTORY_LEN];
+	static float pts[MAX(CHART_POINTS, HISTORY_SHORT_LEN)];	/* only used under lvgl_lock */
+	static float sorted[ARRAY_SIZE(pts)];
 	int n_valid = 0;
-	int len = short_window ? HISTORY_SHORT_LEN : HISTORY_LEN;
-	int n = short_window ? history_get_short(tile_def[id].series, pts, len)
-			     : history_get(tile_def[id].series, pts, len);
+	int len = short_window ? HISTORY_SHORT_LEN : CHART_POINTS;
+	int n = short_window ? history_get(HW_SHORT, tile_def[id].series, pts, len, 1)
+			     : history_get(HW_LONG, tile_def[id].series, pts, len, CHART_GROUP);
 	int offset = len - n;
 	float lo = INFINITY;
 	float hi = -INFINITY;
@@ -463,7 +472,7 @@ static void make_chart_page(lv_obj_t *p, int32_t w)
 	detail.value = make_label(p, &lv_font_montserrat_28, COL_TEXT);
 	lv_obj_align(detail.value, LV_ALIGN_TOP_RIGHT, -GAP - 2, 0);
 
-	detail.chart = make_chart(p, detail.vals, HISTORY_LEN);
+	detail.chart = make_chart(p, detail.vals, CHART_POINTS);
 	lv_obj_set_size(detail.chart, chart_w, CHART_H);
 	lv_obj_set_pos(detail.chart, CHART_X, CHART_Y);
 	lv_obj_set_style_bg_color(detail.chart, COL_TILE, 0);
@@ -482,7 +491,8 @@ static void make_chart_page(lv_obj_t *p, int32_t w)
 	detail.y_min = make_axis_label(p, 0, CHART_Y + CHART_H - half, AXIS_W,
 				       LV_TEXT_ALIGN_RIGHT, NULL);
 
-	/* Time axis. HISTORY_LEN x HISTORY_PERIOD_S = 6 h. */
+	/* Time axis: CHART_HOURS (6) hours. */
+	BUILD_ASSERT(CHART_HOURS == 6, "time axis labels assume 6 hours");
 	int32_t time_y = CHART_Y + CHART_H + 4;
 
 	make_axis_label(p, CHART_X, time_y, 40, LV_TEXT_ALIGN_LEFT, "-6h");

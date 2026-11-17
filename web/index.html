@@ -74,7 +74,7 @@
   </h2>
   <div class="charts" id="charts"></div>
 
-  <footer>Hourly averages (and pollutant peaks, the fainter line) are kept on the device for about 4½ months. Times are in your browser's time zone.</footer>
+  <footer>The last 24 hours are kept in 1-minute detail (back to the device's last restart; earlier hours come from the hourly log). Hourly averages (and pollutant peaks, the fainter line) are kept for about 4½ months. Times are in your browser's time zone.</footer>
 </main>
 
 <script>
@@ -273,12 +273,13 @@ function drawChart(container, m, pts, x0, x1, gap, peaks) {
 const nowS = () => Date.now() / 1000;
 
 // Chart ranges: where the data comes from, and how often to refresh it.
-//   live:  the device's RAM history ("short" = 15 min of 10 s, else 6 h of 3 min)
+//   live:  the device's RAM history ("short" = 15 min of 10 s, "long" = 24 h of
+//          1 min; points = how many to fetch)
 //   days:  the hourly log in flash (0 = all of it)
 const RANGES = {
   "15m": { live: "short", span: 900, refresh: 10 },
-  "6h":  { live: "long", span: 6 * 3600, refresh: 60 },
-  "1d":  { days: 1, refresh: 600 },
+  "6h":  { live: "long", span: 6 * 3600, points: 360, refresh: 60 },
+  "1d":  { live: "long", span: 86400, points: 1440, refresh: 60 },
   "7d":  { days: 7, refresh: 600 },
   "30d": { days: 30, refresh: 600 },
   "all": { days: 0, refresh: 600 },
@@ -295,22 +296,29 @@ function hourlyRows(d) {
 }
 
 // Live (RAM) data. It only goes back to the last boot (before that it's a flat
-// placeholder), so for 6 h the part before boot comes from the hourly log.
+// placeholder), so the part of the window before boot comes from the hourly log.
 function liveCharts(box, cfg, d, early) {
   const end = d.t || nowS();
   const boot = end - d.uptime;
+  // The newest point is the last completed bucket, which ended d.age s ago;
+  // each point is plotted at the middle of its bucket.
+  const last = end - (d.age || 0) - d.period / 2;
   const rows = early ? hourlyRows(early).filter(r => r[0] + 3600 <= boot) : [];
   for (const m of METRICS) {
     const arr = d[m.key] || [];
     const n = arr.length;
-    const live = arr.map((v, i) => [end - (n - 1 - i) * d.period, v === null ? null : m.conv(v)])
-                    .filter(p => p[0] >= boot);
+    const live = arr.map((v, i) => [last - (n - 1 - i) * d.period, v === null ? null : m.conv(v)])
+                    .filter(p => p[0] - d.period / 2 >= boot);
     const col = early ? early.fields.indexOf(m.key) : -1;
     // Each hourly average is plotted at the middle of its hour.
     const hourly = rows.map(r => [r[0] + 1800, r[col] === null ? null : m.conv(r[col])]);
+    // The hourly part keeps its peaks (the live part is detailed enough to show them).
+    const pcol = early && m.peak ? early.fields.indexOf(m.peak) : -1;
+    const peaks = pcol < 0 ? null
+      : rows.map(r => [r[0] + 1800, r[pcol] === null || r[pcol] === undefined ? null : m.conv(r[pcol])]);
     // Join hourly points to each other and to the live data; break on real gaps.
     const gap = hourly.length ? 3600 * 1.5 : d.period * 1.5;
-    drawChart(box, m, hourly.concat(live), end - cfg.span, end, gap);
+    drawChart(box, m, hourly.concat(live), end - cfg.span, end, gap, peaks);
   }
 }
 
@@ -377,7 +385,8 @@ async function pollCharts() {
   try {
     let data;
     if (cfg.live) {
-      const live = await getJSON("/api/recent" + (cfg.live === "short" ? "?window=short" : ""));
+      const live = await getJSON("/api/recent" +
+        (cfg.live === "short" ? "?window=short" : "?points=" + cfg.points));
       // Hourly data to cover the time before the last boot, if it's in the window.
       const early = cfg.live === "long" && live.uptime < cfg.span
         ? await getJSON("/api/history?since=" + Math.floor(nowS() - cfg.span - 3600)) : null;

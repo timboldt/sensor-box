@@ -3,29 +3,38 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * Readings are averaged into HISTORY_PERIOD_S buckets; the last HISTORY_LEN
- * buckets are kept (6 hours at the defaults). A second, short window keeps
- * HISTORY_SHORT_LEN buckets of HISTORY_SHORT_PERIOD_S (15 minutes) for the
- * tiles' trend lines. Values are stored in the same
- * metric units as struct readings. Lost on reboot; at boot each series is
- * backfilled with its first reading (see history.c).
+ * Readings are averaged into fixed-length buckets in two windows:
+ *
+ *  - HW_LONG:  24 hours of 1-minute buckets, for the screen's chart pages
+ *              (6 hours, averaged in threes) and the web page's 6 h and Day
+ *              views;
+ *  - HW_SHORT: 15 minutes of 10-second buckets, for the tiles' trend lines.
+ *
+ * Values are returned in the same metric units as struct readings. Lost on
+ * reboot; at boot each series is backfilled with its first reading (see
+ * history.c).
  */
 
 #ifndef SENSOR_BOX_HISTORY_H_
 #define SENSOR_BOX_HISTORY_H_
 
+#include <stdint.h>
+
 #include "readings.h"
 
-#define HISTORY_LEN 120
+/* Long window: 1440 x 60 s = 24 h. */
+#define HISTORY_LEN 1440
 
-/* Overridable for testing, e.g. west build -- -DEXTRA_CFLAGS=-DHISTORY_PERIOD_S=10 */
-#ifndef HISTORY_PERIOD_S
-#define HISTORY_PERIOD_S 180
-#endif
+#define HISTORY_PERIOD_S 60
 
 /* Short window: 90 x 10 s = 15 min (two 5-second readings per point). */
 #define HISTORY_SHORT_LEN      90
 #define HISTORY_SHORT_PERIOD_S 10
+
+enum history_window {
+	HW_LONG,
+	HW_SHORT,
+};
 
 enum history_series {
 	H_TEMP,		/* degC */
@@ -38,17 +47,27 @@ enum history_series {
 	H_COUNT,
 };
 
-/* Fold one set of readings into the current bucket. Call on every report. */
+/* Fold one set of readings into the current buckets. Call on every report. */
 void history_add(const struct readings *r);
 
 /*
- * Copy up to max points of a series, oldest first, into out. The last point
- * is the still-filling current bucket, so the line moves as soon as a reading
- * comes in. Buckets with no valid reading are NAN. Returns the point count.
+ * Copy the newest points of a series, oldest first, into out (at most max).
+ * The last point is the still-filling current bucket, so a line moves as soon
+ * as a reading comes in. With group > 1, each point is the average of that
+ * many buckets (aligned so the newest group ends now). Buckets with no valid
+ * reading are NAN. Returns the point count.
  */
-int history_get(enum history_series s, float *out, int max);
+int history_get(enum history_window w, enum history_series s, float *out, int max, int group);
 
-/* As history_get, for the short (15-minute) window. */
-int history_get_short(enum history_series s, float *out, int max);
+/*
+ * For reading a window in pieces (e.g. a streamed web response) with every
+ * series lined up: history_snapshot gives the sequence number just past the
+ * newest completed bucket, and the milliseconds since that bucket ended.
+ * history_get_seq then copies completed buckets [first, first + count) of a
+ * series; ones no longer (or not yet) kept come back as NAN.
+ */
+uint32_t history_snapshot(enum history_window w, int64_t *age_ms);
+void history_get_seq(enum history_window w, enum history_series s, uint32_t first, int count,
+		     float *out);
 
 #endif /* SENSOR_BOX_HISTORY_H_ */
