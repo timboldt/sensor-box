@@ -145,7 +145,7 @@ static int now_handler(struct http_client_ctx *client, enum http_transaction_sta
 	jprintf(&j, ",\"tvoc\":");
 	jnum(&j, r.gas_ok, r.tvoc_ppb, 0);
 	jprintf(&j, ",\"lux\":");
-	jnum(&j, r.light_ok, r.lux, 2);
+	jprintf(&j, r.light_ok ? "%.4g" : "null", r.lux);
 	jprintf(&j, ",\"batt_v\":");
 	jnum(&j, r.batt_ok, r.batt_v, 3);
 	jprintf(&j, ",\"batt_pct\":");
@@ -169,7 +169,7 @@ static int recent_handler(struct http_client_ctx *client, enum http_transaction_
 	} series[] = {
 		{ "temp", H_TEMP, 2 }, { "rh", H_RH, 1 },     { "press", H_PRESS, 1 },
 		{ "pm25", H_PM25, 1 }, { "eco2", H_ECO2, 0 }, { "tvoc", H_TVOC, 0 },
-		{ "lux", H_LUX, 2 },
+		{ "lux", H_LUX, 5 },
 	};
 	static char buf[8192];
 	static float pts[HISTORY_LEN];
@@ -263,7 +263,7 @@ static int history_handler(struct http_client_ctx *client, enum http_transaction
 		jprintf(&j, ",");
 		jnum(&j, rec.valid & LTLOG_TVOC, rec.tvoc, 0);
 		jprintf(&j, ",");
-		jnum(&j, rec.valid & LTLOG_LUX, ltlog_lux(&rec), 2);
+		jprintf(&j, (rec.valid & LTLOG_LUX) ? "%.4g" : "null", ltlog_lux(&rec));
 		jprintf(&j, "]");
 		rows++;
 	}

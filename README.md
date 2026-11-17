@@ -16,7 +16,7 @@ local network.
 - The display shows a dashboard of current readings with 6-hour trends, and
   the local time once the clock has been set over the network.
 - **Boot button:** press to page through a full-screen chart for each
-  reading, plus light level (lux, on a log scale); after the last it returns
+  reading, plus light level (in dB, see below); after the last it returns
   to the dashboard, and it also returns on its own after a minute. Don't
   hold Boot while resetting or plugging in (that enters the ESP32-C6
   download mode).
@@ -33,6 +33,10 @@ local network.
   in flash (128 KB, about 6 months, oldest dropped first), kept across
   reboots and reflashes. `ltlog show [n]` lists the newest records (UTC),
   `ltlog clear` erases them.
+- **Light level** is shown in decibels relative to 1 lux (0 dB = 1 lux,
+  +20 dB = 100 lux, -20 dB = 0.01 lux). The TSL2591's gain is adjusted
+  automatically (x1 to x9200), so it reads from daylight down to about
+  -37 dB (~0.0002 lux).
 - **Dark room:** the backlight switches off below 1 lux. A press of Boot
   turns it on for 30 s (that first press only wakes the screen).
 
@@ -62,6 +66,7 @@ No RTC: wall-clock time, when needed, will come from SNTP over Wi-Fi.
 | `src/timesync.c` | Sets the clock (UTC) from SNTP once online, then every 6 h |
 | `src/ltlog.c` | Hourly long-term history in flash (FCB) |
 | `src/web.c`, `web/` | Web dashboard: HTTP server, JSON API and the page |
+| `src/light.c` | TSL2591 auto-gain and lux calculation |
 | `src/backlight.c` | Backlight on/off from ambient light |
 | `app.overlay` | Devicetree for the I2C sensors and the SPI display |
 | `prj.conf`, `Kconfig` | Application Kconfig and its app-specific options |

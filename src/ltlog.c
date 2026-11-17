@@ -33,6 +33,7 @@
 #include <zephyr/shell/shell.h>
 #include <zephyr/storage/flash_map.h>
 
+#include "light.h"
 #include "ltlog.h"
 #include "timesync.h"
 
@@ -68,7 +69,8 @@ static int open_fcb(void)
 
 	memset(&fcb, 0, sizeof(fcb));
 	fcb.f_magic = FCB_MAGIC;
-	fcb.f_version = LTLOG_RECORD_VERSION;
+	/* The FCB's own format version, fixed; records carry their own version. */
+	fcb.f_version = 1;
 	fcb.f_sector_cnt = (uint16_t)cnt;
 	fcb.f_sectors = sectors;
 	return fcb_init(AREA_ID, &fcb);
@@ -137,7 +139,8 @@ static int write_hour(void)
 	rec.pm25 = clamp_u16(avg[F_PM25]);
 	rec.eco2 = clamp_u16(avg[F_ECO2]);
 	rec.tvoc = clamp_u16(avg[F_TVOC]);
-	rec.lux_log = clamp_u16((log10(MAX(avg[F_LUX], 0.01)) + 2.0) * 1000.0);
+	rec.light = (uint16_t)(int16_t)CLAMP(lround(light_db(avg[F_LUX]) * 100.0), INT16_MIN,
+					     INT16_MAX);
 
 	struct fcb_entry loc;
 	int ret = fcb_append(&fcb, sizeof(rec), &loc);
@@ -212,7 +215,7 @@ static int walk_entry(struct fcb_entry_ctx *ctx, void *arg)
 
 	if (ctx->loc.fe_data_len != sizeof(rec) ||
 	    flash_area_read(ctx->fap, FCB_ENTRY_FA_DATA_OFF(ctx->loc), &rec, sizeof(rec)) != 0 ||
-	    rec.version != LTLOG_RECORD_VERSION) {
+	    !ltlog_record_known(&rec)) {
 		return 0;	/* skip anything unexpected */
 	}
 	w->count++;
@@ -241,7 +244,7 @@ int ltlog_next(struct ltlog_cursor *c, struct ltlog_record *rec)
 		if (c->loc.fe_data_len == sizeof(*rec) &&
 		    flash_area_read(fcb.fap, FCB_ENTRY_FA_DATA_OFF(c->loc), rec,
 				    sizeof(*rec)) == 0 &&
-		    rec->version == LTLOG_RECORD_VERSION) {
+		    ltlog_record_known(rec)) {
 			ret = 0;
 			break;
 		}
@@ -285,7 +288,7 @@ static void print_record(const struct shell *sh, const struct ltlog_record *r)
 	time_t t = r->t;
 	struct tm tm;
 	char when[24];
-	char temp[12], rh[12], press[12], pm[12], eco2[12], tvoc[12], lux[16];
+	char temp[12], rh[12], press[12], pm[12], eco2[12], tvoc[12], light[16];
 
 	gmtime_r(&t, &tm);
 	strftime(when, sizeof(when), "%Y-%m-%d %H:%M", &tm);
@@ -295,9 +298,9 @@ static void print_record(const struct shell *sh, const struct ltlog_record *r)
 	FIELD(pm, LTLOG_PM25, "%u", r->pm25);
 	FIELD(eco2, LTLOG_ECO2, "%u", r->eco2);
 	FIELD(tvoc, LTLOG_TVOC, "%u", r->tvoc);
-	FIELD(lux, LTLOG_LUX, "%.2f", ltlog_lux(r));
+	FIELD(light, LTLOG_LUX, "%.1f", ltlog_light_db(r));
 	shell_print(sh, "%s UTC  %6s C  %5s %%RH  %6s hPa  PM2.5 %3s  eCO2 %4s  TVOC %4s  "
-		    "%s lux", when, temp, rh, press, pm, eco2, tvoc, lux);
+		    "%s dB", when, temp, rh, press, pm, eco2, tvoc, light);
 }
 
 static int cmd_show(const struct shell *sh, size_t argc, char **argv)

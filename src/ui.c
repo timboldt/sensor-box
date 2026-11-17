@@ -18,7 +18,7 @@
  *   |  _/\___/\_   |  __/‾‾\__    |  ___/\___    |
  *   +--------------+--------------+--------------+
  *
- * Chart page, one per reading, plus one for light (lux, log scale):
+ * Chart page, one per reading, plus one for light (dB re 1 lux):
  *   | Temperature                       70.5 °F  |
  *   |  72.0 +--------------------------------+   |
  *   |       |        ___/‾‾‾\___             |   |
@@ -57,6 +57,7 @@
 #include <lvgl_zephyr.h>
 
 #include "history.h"
+#include "light.h"
 #include "timesync.h"
 #include "ui.h"
 
@@ -122,7 +123,7 @@ static const struct {
 	[T_PM25] = { "PM2.5", "PM2.5", "ug/m3", 0, H_PM25, 10.0f },
 	[T_ECO2] = { "eCO2", "eCO2", "ppm", 0, H_ECO2, 200.0f },
 	[T_TVOC] = { "TVOC", "TVOC", "ppb", 0, H_TVOC, 50.0f },
-	[T_LIGHT] = { "Light", "Light (log scale)", "lux", 0, H_LUX, 1.0f, true },
+	[T_LIGHT] = { "Light", "Light", "dB", 0, H_LUX, 10.0f, false },
 };
 
 /* Floor for log-scale charts: 0 lux (a dark room) plots as this. */
@@ -172,6 +173,9 @@ static float to_display(enum tile_id id, float v)
 	if (US && id == T_PRESS) {
 		return v / 33.8639f;	/* hPa -> inHg */
 	}
+	if (id == T_LIGHT) {
+		return (float)light_db(v);	/* lux -> dB re 1 lux */
+	}
 	return v;
 }
 
@@ -212,7 +216,7 @@ static bool current_value(enum tile_id id, const struct readings *r, float *v)
 		*v = (float)r->tvoc_ppb;
 		return r->gas_ok;
 	case T_LIGHT:
-		*v = (float)r->lux;
+		*v = (float)light_db(r->lux);
 		return r->light_ok;
 	default:
 		return false;
@@ -253,7 +257,7 @@ static void format(enum tile_id id, float v, char *buf, size_t len)
 {
 	int decimals = tile_def[id].decimals;
 
-	if (id == T_LIGHT && v < 10.0f) {
+	if (id == T_LIGHT && fabsf(v) < 10.0f) {
 		decimals = 1;
 	}
 	snprintf(buf, len, "%.*f", decimals, (double)v);
@@ -641,7 +645,8 @@ void ui_update(const struct readings *r)
 	}
 
 	if (r->light_ok) {
-		snprintf(buf, sizeof(buf), "%.0f lux", r->lux);
+		/* Whole lux in a lit room, two significant digits in the dark. */
+		snprintf(buf, sizeof(buf), r->lux >= 10.0 ? "%.0f lux" : "%.2g lux", r->lux);
 		lv_label_set_text(light_label, buf);
 	} else {
 		lv_label_set_text_static(light_label, "-- lux");

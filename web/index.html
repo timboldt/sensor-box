@@ -97,8 +97,9 @@ const METRICS = [
     bands: [800, 1200, 2000], warm: "gas_warming" },
   { key: "tvoc",  name: "TVOC", unit: () => "ppb", conv: v => v, dec: 0, span: () => 50,
     bands: [220, 660, 2200], warm: "gas_warming" },
-  { key: "lux",   name: "Light", unit: () => "lux", conv: v => v, dec: v => v < 10 ? 1 : 0,
-    span: () => 1, log: true },
+  // Light as decibels re 1 lux (0 dB = 1 lux, -30 dB = 0.001 lux).
+  { key: "lux",   name: "Light", unit: () => "dB", conv: v => 10 * Math.log10(Math.max(v, 1e-5)),
+    dec: v => Math.abs(v) < 10 ? 1 : 0, span: () => 10, luxNote: true },
 ];
 
 const decimals = (m, v) => typeof m.dec === "function" ? m.dec(v) : m.dec;
@@ -132,7 +133,11 @@ function renderTiles(d) {
     }
     val.append(el("span", "unit", m.unit()));
     t.append(val);
-    t.append(el("div", "note", m.warm && d[m.warm] ? "warming up" : ""));
+    let note = m.warm && d[m.warm] ? "warming up" : "";
+    if (m.luxNote && raw !== null && raw !== undefined) {
+      note = (raw >= 10 ? raw.toFixed(0) : raw.toPrecision(2)) + " lux";
+    }
+    t.append(el("div", "note", note));
     box.append(t);
   }
 }

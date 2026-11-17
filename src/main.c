@@ -37,6 +37,7 @@
 #include "backlight.h"
 #include "baseline.h"
 #include "history.h"
+#include "light.h"
 #include "ltlog.h"
 #include "readings.h"
 #include "timesync.h"
@@ -54,7 +55,6 @@ static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
 
 /* I2C devices from app.overlay; *_OR_NULL keeps the build fine if removed. */
 static const struct device *const bme280 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(bme280));
-static const struct device *const tsl2591 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(tsl2591));
 static const struct device *const max17048 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(max17048));
 static const struct device *const pmsa003i = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(pmsa003i));
 static const struct device *const sgp30 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(sgp30));
@@ -137,28 +137,17 @@ static void report_bme280(struct readings *r)
 
 static void report_tsl2591(struct readings *r)
 {
-	if (tsl2591 == NULL || !device_is_ready(tsl2591)) {
-		LOG_WRN("tsl2591: not ready, skipping");
+	double lux;
+
+	/* Auto-gain and the lux formula live in light.c. */
+	if (!light_read(&lux)) {
+		LOG_INF("tsl2591: no reading (settling or unavailable)");
 		return;
 	}
 
-	/* Fetch everything; SENSOR_CHAN_LIGHT is the lux approximation. */
-	if (sensor_sample_fetch(tsl2591) != 0) {
-		LOG_WRN("tsl2591: sample fetch failed");
-		return;
-	}
-
-	struct sensor_value light, ir;
-
-	sensor_channel_get(tsl2591, SENSOR_CHAN_LIGHT, &light);
-	sensor_channel_get(tsl2591, SENSOR_CHAN_IR, &ir);
-
-	LOG_INF("tsl2591: %.2f lux  (ir %.0f)",
-		sensor_value_to_double(&light),
-		sensor_value_to_double(&ir));
-
+	LOG_INF("tsl2591: %.4g lux (%.1f dB, gain %s)", lux, light_db(lux), light_gain_name());
 	r->light_ok = true;
-	r->lux = sensor_value_to_double(&light);
+	r->lux = lux;
 }
 
 static void report_max17048(struct readings *r)
@@ -288,6 +277,7 @@ int main(void)
 
 	backlight_init();
 	baseline_init();
+	light_init();
 	ltlog_init();
 	timesync_init();
 	wifi_init();
