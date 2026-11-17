@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: MIT
  *
  * Readings are averaged into HISTORY_PERIOD_S buckets; the last HISTORY_LEN
- * buckets are kept (6 hours at the defaults). Values are stored in the same
+ * buckets are kept (6 hours at the defaults). A second, short window keeps
+ * HISTORY_SHORT_LEN buckets of HISTORY_SHORT_PERIOD_S (15 minutes) for the
+ * tiles' trend lines. Values are stored in the same
  * metric units as struct readings. Lost on reboot; at boot each series is
  * backfilled with its first reading (see history.c).
  */
@@ -20,6 +22,10 @@
 #ifndef HISTORY_PERIOD_S
 #define HISTORY_PERIOD_S 180
 #endif
+
+/* Short window: 90 x 10 s = 15 min (two 5-second readings per point). */
+#define HISTORY_SHORT_LEN      90
+#define HISTORY_SHORT_PERIOD_S 10
 
 enum history_series {
 	H_TEMP,		/* degC */
@@ -41,5 +47,8 @@ void history_add(const struct readings *r);
  * comes in. Buckets with no valid reading are NAN. Returns the point count.
  */
 int history_get(enum history_series s, float *out, int max);
+
+/* As history_get, for the short (15-minute) window. */
+int history_get_short(enum history_series s, float *out, int max);
 
 #endif /* SENSOR_BOX_HISTORY_H_ */

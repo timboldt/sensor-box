@@ -5,7 +5,11 @@
  *
  *   /                      the dashboard page (web/index.html, gzipped)
  *   /api/now               current readings
- *   /api/recent            the 6-hour RAM history (3-minute averages)
+ *   /api/recent[?window=short]
+ *                          the 6-hour RAM history (3-minute averages), or with
+ *                          window=short the 15-minute one (10 s); points
+ *                          from before "uptime" seconds ago are the boot-time
+ *                          backfill, not measurements
  *   /api/history?since=T   the long-term hourly log from flash, from UTC T on
  *
  * Values are metric; "us_units" in /api/now tells the page how to display
@@ -179,11 +183,21 @@ static int recent_handler(struct http_client_ctx *client, enum http_transaction_
 		return 0;
 	}
 
-	/* Points are oldest first, HISTORY_PERIOD_S apart, the last one "now". */
-	jprintf(&j, "{\"period\":%d,\"t\":", HISTORY_PERIOD_S);
+	/* "?window=short": the 15-minute window the screen's tiles use. */
+	char q[32] = "";
+
+	memcpy(q, req->data, MIN(req->data_len, sizeof(q) - 1));
+	bool short_window = strstr(q, "window=short") != NULL;
+	int len = short_window ? HISTORY_SHORT_LEN : HISTORY_LEN;
+
+	/* Points are oldest first, "period" seconds apart, the last one "now". */
+	/* uptime lets the page tell real points from the boot-time backfill. */
+	jprintf(&j, "{\"period\":%d,\"uptime\":%lld,\"t\":",
+		short_window ? HISTORY_SHORT_PERIOD_S : HISTORY_PERIOD_S, k_uptime_get() / 1000);
 	jnum(&j, timesync_valid(), (double)timesync_now(), 0);
 	for (size_t i = 0; i < ARRAY_SIZE(series); i++) {
-		int n = history_get(series[i].s, pts, HISTORY_LEN);
+		int n = short_window ? history_get_short(series[i].s, pts, len)
+				     : history_get(series[i].s, pts, len);
 
 		jprintf(&j, ",\"%s\":[", series[i].name);
 		for (int k = 0; k < n; k++) {

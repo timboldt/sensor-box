@@ -11,7 +11,7 @@
  *   +--------------+--------------+--------------+
  *   |     Temp     |   Humidity   |   Pressure   |  title
  *   |     70.5     |      64      |    30.07     |  current value
- *   |  ___/‾‾\__   |  ‾‾\___/‾    |  ____/‾‾‾    |  trend, last 6 h
+ *   |  ___/‾‾\__   |  ‾‾\___/‾    |  ____/‾‾‾    |  trend, last 15 min
  *   +--------------+--------------+--------------+
  *   |    PM2.5     |     eCO2     |     TVOC     |  air-quality values
  *   |       6      |     400      |       0      |  coloured by band
@@ -281,16 +281,18 @@ static float from_chart(enum tile_id id, float y)
  * below. Returns the y range in chart units (see to_chart) via lo/hi;
  * false if no data.
  */
-static bool fill_trend(enum tile_id id, lv_obj_t *chart, int32_t *vals, float margin_frac,
-		       float *lo_out, float *hi_out)
+static bool fill_trend(enum tile_id id, lv_obj_t *chart, int32_t *vals, bool short_window,
+		       float margin_frac, float *lo_out, float *hi_out)
 {
 	static float pts[HISTORY_LEN];	/* only used under lvgl_lock */
-	int n = history_get(tile_def[id].series, pts, HISTORY_LEN);
-	int offset = HISTORY_LEN - n;
+	int len = short_window ? HISTORY_SHORT_LEN : HISTORY_LEN;
+	int n = short_window ? history_get_short(tile_def[id].series, pts, len)
+			     : history_get(tile_def[id].series, pts, len);
+	int offset = len - n;
 	float lo = INFINITY;
 	float hi = -INFINITY;
 
-	for (int i = 0; i < HISTORY_LEN; i++) {
+	for (int i = 0; i < len; i++) {
 		vals[i] = LV_CHART_POINT_NONE;
 	}
 	for (int i = 0; i < n; i++) {
@@ -347,22 +349,22 @@ static lv_obj_t *make_axis_label(lv_obj_t *parent, int32_t x, int32_t y, int32_t
 	return label;
 }
 
-/* A bare line chart for HISTORY_LEN points over an external array. */
-static lv_obj_t *make_chart(lv_obj_t *parent, int32_t *vals)
+/* A bare line chart for `len` points over an external array. */
+static lv_obj_t *make_chart(lv_obj_t *parent, int32_t *vals, int len)
 {
 	lv_obj_t *chart = lv_chart_create(parent);
 
 	lv_obj_remove_style_all(chart);
 	lv_chart_set_type(chart, LV_CHART_TYPE_LINE);
 	lv_chart_set_div_line_count(chart, 0, 0);
-	lv_chart_set_point_count(chart, HISTORY_LEN);
+	lv_chart_set_point_count(chart, len);
 	lv_obj_set_style_line_width(chart, 2, LV_PART_ITEMS);
 	lv_obj_set_style_line_rounded(chart, true, LV_PART_ITEMS);
 	lv_obj_set_style_size(chart, 0, 0, LV_PART_INDICATOR);
 
 	lv_chart_series_t *ser = lv_chart_add_series(chart, COL_TREND, LV_CHART_AXIS_PRIMARY_Y);
 
-	for (int i = 0; i < HISTORY_LEN; i++) {
+	for (int i = 0; i < len; i++) {
 		vals[i] = LV_CHART_POINT_NONE;
 	}
 	lv_chart_set_series_ext_y_array(chart, ser, vals);
@@ -402,7 +404,7 @@ static lv_obj_t *make_tile(lv_obj_t *parent, enum tile_id id, int32_t w, int32_t
 	lv_label_set_text_static(t->value, "--");
 	lv_obj_align(t->value, LV_ALIGN_TOP_MID, 0, 16);
 
-	t->trend = make_chart(box, t->trend_vals);
+	t->trend = make_chart(box, t->trend_vals, HISTORY_SHORT_LEN);
 	lv_obj_set_size(t->trend, LV_PCT(100), TREND_H);
 	lv_obj_align(t->trend, LV_ALIGN_BOTTOM_MID, 0, 0);
 
@@ -422,7 +424,7 @@ static void make_chart_page(lv_obj_t *p, int32_t w)
 	detail.value = make_label(p, &lv_font_montserrat_28, COL_TEXT);
 	lv_obj_align(detail.value, LV_ALIGN_TOP_RIGHT, -GAP - 2, 0);
 
-	detail.chart = make_chart(p, detail.vals);
+	detail.chart = make_chart(p, detail.vals, HISTORY_LEN);
 	lv_obj_set_size(detail.chart, chart_w, CHART_H);
 	lv_obj_set_pos(detail.chart, CHART_X, CHART_Y);
 	lv_obj_set_style_bg_color(detail.chart, COL_TILE, 0);
@@ -529,7 +531,7 @@ static void render_chart_page(void)
 		lv_obj_set_style_text_color(detail.value, COL_MUTED, 0);
 	}
 
-	if (fill_trend(id, detail.chart, detail.vals, 0.05f, &lo, &hi)) {
+	if (fill_trend(id, detail.chart, detail.vals, false, 0.05f, &lo, &hi)) {
 		format(id, from_chart(id, hi), buf, sizeof(buf));
 		lv_label_set_text(detail.y_max, buf);
 		format(id, from_chart(id, (lo + hi) / 2.0f), buf, sizeof(buf));
@@ -605,7 +607,7 @@ static void update_tile(enum tile_id id, const struct readings *r)
 		lv_obj_set_style_text_color(t->value, COL_MUTED, 0);
 	}
 
-	fill_trend(id, t->trend, t->trend_vals, 0.0f, &lo, &hi);
+	fill_trend(id, t->trend, t->trend_vals, true, 0.0f, &lo, &hi);
 }
 
 void ui_update(const struct readings *r)
