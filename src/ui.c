@@ -45,6 +45,7 @@
 
 #include <errno.h>
 #include <math.h>
+#include <stdlib.h>
 #include <stdio.h>
 
 #include <zephyr/device.h>
@@ -114,15 +115,16 @@ static const struct {
 	enum history_series series;
 	float min_span;			/* smallest trend y-range, display units */
 	bool log_scale;			/* chart log10(value); min_span in decades */
+	bool cap_spikes;		/* y range ignores rare huge spikes (see fill_trend) */
 } tile_def[T_COUNT] = {
 	[T_TEMP] = { "Temp", "Temperature", US ? "\xc2\xb0" "F" : "\xc2\xb0" "C",
 		     1, H_TEMP, US ? 2.0f : 1.0f },
 	[T_RH] = { "Humidity", "Humidity", "%RH", 0, H_RH, 5.0f },
 	[T_PRESS] = { "Pressure", "Pressure (sea level)", US ? "inHg" : "hPa",
 		      US ? 2 : 0, H_PRESS, US ? 0.05f : 2.0f },
-	[T_PM25] = { "PM2.5", "PM2.5", "ug/m3", 0, H_PM25, 10.0f },
-	[T_ECO2] = { "eCO2", "eCO2", "ppm", 0, H_ECO2, 200.0f },
-	[T_TVOC] = { "TVOC", "TVOC", "ppb", 0, H_TVOC, 50.0f },
+	[T_PM25] = { "PM2.5", "PM2.5", "ug/m3", 0, H_PM25, 10.0f, false, true },
+	[T_ECO2] = { "eCO2", "eCO2", "ppm", 0, H_ECO2, 200.0f, false, true },
+	[T_TVOC] = { "TVOC", "TVOC", "ppb", 0, H_TVOC, 50.0f, false, true },
 	[T_LIGHT] = { "Light", "Light", "dB", 0, H_LUX, 10.0f, false },
 };
 
@@ -275,6 +277,13 @@ static float from_chart(enum tile_id id, float y)
 	return tile_def[id].log_scale ? powf(10.0f, y) : y;
 }
 
+static int cmp_float(const void *a, const void *b)
+{
+	float x = *(const float *)a, y = *(const float *)b;
+
+	return (x > y) - (x < y);
+}
+
 /*
  * Load a tile's history into vals (HISTORY_LEN points, newest at the right)
  * and set the chart's y range to fit, with margin_frac headroom above and
@@ -285,6 +294,8 @@ static bool fill_trend(enum tile_id id, lv_obj_t *chart, int32_t *vals, bool sho
 		       float margin_frac, float *lo_out, float *hi_out)
 {
 	static float pts[HISTORY_LEN];	/* only used under lvgl_lock */
+	static float sorted[HISTORY_LEN];
+	int n_valid = 0;
 	int len = short_window ? HISTORY_SHORT_LEN : HISTORY_LEN;
 	int n = short_window ? history_get_short(tile_def[id].series, pts, len)
 			     : history_get(tile_def[id].series, pts, len);
@@ -303,10 +314,29 @@ static bool fill_trend(enum tile_id id, lv_obj_t *chart, int32_t *vals, bool sho
 
 		lo = MIN(lo, v);
 		hi = MAX(hi, v);
+		sorted[n_valid++] = v;
 		vals[offset + i] = (int32_t)lroundf(v * TREND_SCALE);
 	}
 
 	bool have_data = lo <= hi;
+	bool capped = false;
+
+	/*
+	 * Pollutants: a brief huge spike (the SGP30 tops out at 60000) would
+	 * squash everything else flat. The range follows the bulk of the data
+	 * (its 90th percentile) with room for twice that; higher points are
+	 * pinned to the top edge. Same rule as the web page.
+	 */
+	if (have_data && tile_def[id].cap_spikes) {
+		qsort(sorted, n_valid, sizeof(sorted[0]), cmp_float);
+		float core = sorted[(int)(0.9f * (n_valid - 1))];
+		float cap = lo + 2.0f * MAX(core - lo, tile_def[id].min_span);
+
+		if (hi > cap) {
+			hi = cap;
+			capped = true;
+		}
+	}
 
 	if (have_data) {
 		/* Centre the data in at least min_span, so noise stays flat. */
@@ -316,6 +346,15 @@ static bool fill_trend(enum tile_id id, lv_obj_t *chart, int32_t *vals, bool sho
 		span *= 1.0f + 2.0f * margin_frac;
 		*lo_out = mid - span / 2.0f;
 		*hi_out = mid + span / 2.0f;
+		if (capped) {
+			int32_t top = (int32_t)lroundf(*hi_out * TREND_SCALE);
+
+			for (int i = 0; i < len; i++) {
+				if (vals[i] != LV_CHART_POINT_NONE && vals[i] > top) {
+					vals[i] = top;
+				}
+			}
+		}
 		lv_chart_set_axis_range(chart, LV_CHART_AXIS_PRIMARY_Y,
 					(int32_t)lroundf(*lo_out * TREND_SCALE),
 					(int32_t)lroundf(*hi_out * TREND_SCALE));
