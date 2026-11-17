@@ -29,10 +29,10 @@ local network.
   restored once the clock is set, unless it's over 7 days old (Sensirion's
   limit); with no network for 2 minutes it's restored without the check.
   `sgp30 baseline [save|clear]` on the console shows, saves or clears it.
-- **Long-term history:** every reading is averaged per clock hour and stored
-  in flash (128 KB, about 6 months, oldest dropped first), kept across
-  reboots and reflashes. `ltlog show [n]` lists the newest records (UTC),
-  `ltlog clear` erases them.
+- **Long-term history:** every reading is averaged per clock hour, and the
+  peak PM2.5, eCO2 and TVOC of each hour are kept too, in flash (128 KB,
+  about 4½ months, oldest dropped first), kept across reboots and reflashes.
+  `ltlog show [n]` lists the newest records (UTC), `ltlog clear` erases them.
 - **Light level** is shown in decibels relative to 1 lux (0 dB = 1 lux,
   +20 dB = 100 lux, -20 dB = 0.01 lux). The TSL2591's gain is adjusted
   automatically (x1 to x9200), so it reads from daylight down to about

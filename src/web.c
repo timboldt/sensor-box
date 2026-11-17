@@ -219,7 +219,7 @@ static int history_handler(struct http_client_ctx *client, enum http_transaction
 			   const struct http_request_ctx *req, struct http_response_ctx *rsp,
 			   void *user_data)
 {
-	static char buf[HIST_ROWS_PER_CHUNK * 96 + 128];
+	static char buf[HIST_ROWS_PER_CHUNK * 120 + 160];
 	static struct ltlog_cursor cur;
 	static uint32_t since;
 	static bool started;
@@ -248,7 +248,8 @@ static int history_handler(struct http_client_ctx *client, enum http_transaction
 		rsp->headers = json_headers;
 		rsp->header_count = ARRAY_SIZE(json_headers);
 		jprintf(&j, "{\"period\":3600,\"fields\":[\"t\",\"temp\",\"rh\",\"press\","
-			    "\"pm25\",\"eco2\",\"tvoc\",\"lux\"],\"rows\":[");
+			    "\"pm25\",\"eco2\",\"tvoc\",\"lux\",\"pm25_max\",\"eco2_max\","
+			    "\"tvoc_max\"],\"rows\":[");
 	}
 
 	struct ltlog_record rec;
@@ -278,6 +279,15 @@ static int history_handler(struct http_client_ctx *client, enum http_transaction
 		jnum(&j, rec.valid & LTLOG_TVOC, rec.tvoc, 0);
 		jprintf(&j, ",");
 		jprintf(&j, (rec.valid & LTLOG_LUX) ? "%.4g" : "null", ltlog_lux(&rec));
+		/* Peaks: null for records written before peaks were kept. */
+		bool peaks = ltlog_has_peaks(&rec);
+
+		jprintf(&j, ",");
+		jnum(&j, peaks && (rec.valid & LTLOG_PM25), rec.pm25_max, 0);
+		jprintf(&j, ",");
+		jnum(&j, peaks && (rec.valid & LTLOG_ECO2), rec.eco2_max, 0);
+		jprintf(&j, ",");
+		jnum(&j, peaks && (rec.valid & LTLOG_TVOC), rec.tvoc_max, 0);
 		jprintf(&j, "]");
 		rows++;
 	}

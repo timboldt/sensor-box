@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: MIT
  *
  * Readings are averaged per UTC clock hour and, when the hour ends, written
- * as one 20-byte record to an FCB (flash circular buffer) in the "history"
- * partition. When the buffer is full the oldest 4 KB sector is erased; at
- * 28 bytes per record in flash (length header and CRC, each padded to the
- * 4-byte write size) 128 KB holds about 6 months.
+ * as one 26-byte record (averages, plus the peak of each pollutant) to an
+ * FCB (flash circular buffer) in the "history" partition. When the buffer is
+ * full the oldest 4 KB sector is erased; at 36 bytes per record in flash
+ * (data padded to the 4-byte write size, plus a length header and a CRC)
+ * 128 KB holds about 4.8 months.
  *
  * Readings before the clock is first set (no RTC; ~15 s after boot) are not
  * recorded, since they can't be timestamped. A reboot loses the partial hour
@@ -54,6 +55,7 @@ static struct {
 	uint32_t hour;			/* UTC seconds at its start; 0 = none */
 	double sum[7];
 	uint32_t n[7];
+	double max[7];		/* used for the pollutants */
 } acc;
 
 enum field { F_TEMP, F_RH, F_PRESS, F_PM25, F_ECO2, F_TVOC, F_LUX };
@@ -141,6 +143,9 @@ static int write_hour(void)
 	rec.tvoc = clamp_u16(avg[F_TVOC]);
 	rec.light = (uint16_t)(int16_t)CLAMP(lround(light_db(avg[F_LUX]) * 100.0), INT16_MIN,
 					     INT16_MAX);
+	rec.pm25_max = clamp_u16(acc.max[F_PM25]);
+	rec.eco2_max = clamp_u16(acc.max[F_ECO2]);
+	rec.tvoc_max = clamp_u16(acc.max[F_TVOC]);
 
 	struct fcb_entry loc;
 	int ret = fcb_append(&fcb, sizeof(rec), &loc);
@@ -168,6 +173,7 @@ static void add(enum field f, bool ok, double v)
 {
 	if (ok) {
 		acc.sum[f] += v;
+		acc.max[f] = acc.n[f] == 0 ? v : MAX(acc.max[f], v);
 		acc.n[f]++;
 	}
 }
@@ -202,6 +208,20 @@ void ltlog_add(const struct readings *r)
 	k_mutex_unlock(&lock);
 }
 
+/* Read the record at loc (any known version) into *rec. False if unusable. */
+static bool read_record(const struct flash_area *fap, const struct fcb_entry *loc,
+			struct ltlog_record *rec)
+{
+	uint16_t len = loc->fe_data_len;
+
+	if (len != LTLOG_V2_SIZE && len != sizeof(*rec)) {
+		return false;
+	}
+	memset(rec, 0, sizeof(*rec));
+	return flash_area_read(fap, loc->fe_sector->fs_off + loc->fe_data_off, rec, len) == 0 &&
+	       ltlog_record_known(rec);
+}
+
 struct walk_ctx {
 	bool (*cb)(const struct ltlog_record *rec, void *arg);
 	void *arg;
@@ -213,9 +233,7 @@ static int walk_entry(struct fcb_entry_ctx *ctx, void *arg)
 	struct walk_ctx *w = arg;
 	struct ltlog_record rec;
 
-	if (ctx->loc.fe_data_len != sizeof(rec) ||
-	    flash_area_read(ctx->fap, FCB_ENTRY_FA_DATA_OFF(ctx->loc), &rec, sizeof(rec)) != 0 ||
-	    !ltlog_record_known(&rec)) {
+	if (!read_record(ctx->fap, &ctx->loc, &rec)) {
 		return 0;	/* skip anything unexpected */
 	}
 	w->count++;
@@ -241,10 +259,7 @@ int ltlog_next(struct ltlog_cursor *c, struct ltlog_record *rec)
 	k_mutex_lock(&lock, K_FOREVER);
 
 	while (ready && fcb_getnext(&fcb, &c->loc) == 0) {
-		if (c->loc.fe_data_len == sizeof(*rec) &&
-		    flash_area_read(fcb.fap, FCB_ENTRY_FA_DATA_OFF(c->loc), rec,
-				    sizeof(*rec)) == 0 &&
-		    ltlog_record_known(rec)) {
+		if (read_record(fcb.fap, &c->loc, rec)) {
 			ret = 0;
 			break;
 		}
@@ -299,8 +314,14 @@ static void print_record(const struct shell *sh, const struct ltlog_record *r)
 	FIELD(eco2, LTLOG_ECO2, "%u", r->eco2);
 	FIELD(tvoc, LTLOG_TVOC, "%u", r->tvoc);
 	FIELD(light, LTLOG_LUX, "%.1f", ltlog_light_db(r));
+	char peaks[40] = "";
+
+	if (ltlog_has_peaks(r)) {
+		snprintf(peaks, sizeof(peaks), "  peaks %u/%u/%u", r->pm25_max, r->eco2_max,
+			 r->tvoc_max);
+	}
 	shell_print(sh, "%s UTC  %6s C  %5s %%RH  %6s hPa  PM2.5 %3s  eCO2 %4s  TVOC %4s  "
-		    "%s dB", when, temp, rh, press, pm, eco2, tvoc, light);
+		    "%s dB%s", when, temp, rh, press, pm, eco2, tvoc, light, peaks);
 }
 
 static int cmd_show(const struct shell *sh, size_t argc, char **argv)

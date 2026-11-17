@@ -39,17 +39,30 @@ struct ltlog_record {
 	uint16_t light;		/* v2: int16 dB re 1 lux x 100; v1: (log10(lux) + 2) x 1000 */
 	uint8_t valid;		/* LTLOG_* bits */
 	uint8_t version;	/* LTLOG_RECORD_VERSION */
+	/* v3 and later: the hour's highest single reading of each pollutant. */
+	uint16_t pm25_max;	/* ug/m3 */
+	uint16_t eco2_max;	/* ppm */
+	uint16_t tvoc_max;	/* ppb */
 } __packed;
 
 /*
  * Record format. v1 (2026-11-16) stored light as log10(lux) with a 0.01 lux
- * floor; v2 stores dB re 1 lux, reaching far below 1 lux. Both are read.
+ * floor; v2 stores dB re 1 lux, reaching far below 1 lux; v3 adds the
+ * pollutant peaks at the end (v1/v2 records are the first 20 bytes). All
+ * are read; fields a version doesn't have read as zero.
  */
-#define LTLOG_RECORD_VERSION 2
+#define LTLOG_RECORD_VERSION 3
+#define LTLOG_V2_SIZE        20
 
 static inline bool ltlog_record_known(const struct ltlog_record *r)
 {
-	return r->version == 1 || r->version == 2;
+	return r->version >= 1 && r->version <= 3;
+}
+
+/* Whether the record has the pollutant peaks (pm25_max etc.). */
+static inline bool ltlog_has_peaks(const struct ltlog_record *r)
+{
+	return r->version >= 3;
 }
 
 /* Light in dB re 1 lux (0 dB = 1 lux). */

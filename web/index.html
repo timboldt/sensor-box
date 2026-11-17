@@ -74,7 +74,7 @@
   </h2>
   <div class="charts" id="charts"></div>
 
-  <footer>Hourly averages are kept on the device for about six months. Times are in your browser's time zone.</footer>
+  <footer>Hourly averages (and pollutant peaks, the fainter line) are kept on the device for about 4½ months. Times are in your browser's time zone.</footer>
 </main>
 
 <script>
@@ -90,11 +90,11 @@ const METRICS = [
   { key: "press", name: "Pressure (MSL)", unit: () => US ? "inHg" : "hPa",
     conv: v => US ? v / 33.8639 : v, dec: () => US ? 2 : 0, span: () => US ? 0.05 : 2 },
   { key: "pm25",  name: "PM2.5", unit: () => "µg/m³", conv: v => v, dec: 0, span: () => 10,
-    bands: [9, 35, 55], warm: "pm_warming" },
+    bands: [9, 35, 55], warm: "pm_warming", peak: "pm25_max" },
   { key: "eco2",  name: "eCO2", unit: () => "ppm", conv: v => v, dec: 0, span: () => 200,
-    bands: [800, 1200, 2000], warm: "gas_warming" },
+    bands: [800, 1200, 2000], warm: "gas_warming", peak: "eco2_max" },
   { key: "tvoc",  name: "TVOC", unit: () => "ppb", conv: v => v, dec: 0, span: () => 50,
-    bands: [220, 660, 2200], warm: "gas_warming" },
+    bands: [220, 660, 2200], warm: "gas_warming", peak: "tvoc_max" },
   // Light as decibels re 1 lux (0 dB = 1 lux, -30 dB = 0.001 lux).
   { key: "lux",   name: "Light", unit: () => "dB", conv: v => 10 * Math.log10(Math.max(v, 1e-5)),
     dec: v => Math.abs(v) < 10 ? 1 : 0, span: () => 10, luxNote: true },
@@ -160,7 +160,9 @@ function timeLabel(t, spanS) {
 }
 
 // pts: [[t (unix s), v (display units) or null], ...]; gap: max seconds between joined points
-function drawChart(container, m, pts, x0, x1, gap) {
+// peaks (optional): a second series, e.g. each hour's highest reading, drawn
+// as a fainter line above the averages.
+function drawChart(container, m, pts, x0, x1, gap, peaks) {
   const card = el("div", "chart");
   const head = el("div", "head");
   head.append(el("span", "name", m.name + " (" + m.unit() + ")"));
@@ -170,8 +172,11 @@ function drawChart(container, m, pts, x0, x1, gap) {
   container.append(card);
 
   // Only what's inside the time window counts (and gets drawn).
-  pts = pts.filter(p => p[0] >= x0 && p[0] <= x1);
+  const inWindow = p => p[0] >= x0 && p[0] <= x1;
+  pts = pts.filter(inWindow);
+  peaks = (peaks || []).filter(inWindow);
   const vals = pts.filter(p => p[1] !== null);
+  const peakVals = peaks.filter(p => p[1] !== null);
   if (vals.length === 0) {
     card.append(el("div", "empty", "no data yet"));
     return;
@@ -179,13 +184,14 @@ function drawChart(container, m, pts, x0, x1, gap) {
 
   const ty = v => m.log ? Math.log10(Math.max(v, 0.1)) : v;
   let lo = Math.min(...vals.map(p => ty(p[1])));
-  let hi = Math.max(...vals.map(p => ty(p[1])));
+  let hi = Math.max(...vals.concat(peakVals).map(p => ty(p[1])));
   const minSpan = m.span();
   if (hi - lo < minSpan) { const mid = (hi + lo) / 2; lo = mid - minSpan / 2; hi = mid + minSpan / 2; }
   const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
 
   const vmin = Math.min(...vals.map(p => p[1])), vmax = Math.max(...vals.map(p => p[1]));
-  range.textContent = "min " + fmt(m, vmin) + " · max " + fmt(m, vmax);
+  range.textContent = "min " + fmt(m, vmin) + " · max " + fmt(m, vmax) +
+    (peakVals.length ? " · peak " + fmt(m, Math.max(...peakVals.map(p => p[1]))) : "");
 
   const W = Math.max(card.clientWidth - 24, 200), H = 150, L = 44, R = 6, T = 8, B = 20;
   const sx = t => L + (t - x0) / (x1 - x0) * (W - L - R);
@@ -210,15 +216,23 @@ function drawChart(container, m, pts, x0, x1, gap) {
     lab.textContent = timeLabel(t, x1 - x0);
     svg.append(lab);
   }
-  // the line, broken at missing values and gaps
-  let d = "", prevT = null;
-  for (const [t, v] of pts) {
-    if (v === null) { prevT = null; continue; }
-    const cmd = prevT !== null && t - prevT <= gap ? "L" : "M";
-    d += `${cmd}${sx(t).toFixed(1)},${sy(v).toFixed(1)}`;
-    prevT = t;
+  // lines, broken at missing values and gaps
+  const path = series => {
+    let d = "", prevT = null;
+    for (const [t, v] of series) {
+      if (v === null) { prevT = null; continue; }
+      const cmd = prevT !== null && t - prevT <= gap ? "L" : "M";
+      d += `${cmd}${sx(t).toFixed(1)},${sy(v).toFixed(1)}`;
+      prevT = t;
+    }
+    return d;
+  };
+  if (peakVals.length) {
+    svg.append(svgEl("path", { d: path(peaks), fill: "none", stroke: "var(--line)",
+      "stroke-width": 1.5, "stroke-opacity": 0.4, "stroke-linejoin": "round",
+      "stroke-linecap": "round", "vector-effect": "non-scaling-stroke" }));
   }
-  svg.append(svgEl("path", { d, fill: "none", stroke: "var(--line)", "stroke-width": 2,
+  svg.append(svgEl("path", { d: path(pts), fill: "none", stroke: "var(--line)", "stroke-width": 2,
     "stroke-linejoin": "round", "stroke-linecap": "round", "vector-effect": "non-scaling-stroke" }));
   // single points (e.g. one hour of history) still show up
   if (vals.length === 1) {
@@ -280,7 +294,11 @@ function hourlyCharts(box, cfg, d) {
   for (const m of METRICS) {
     const col = d.fields.indexOf(m.key);
     const pts = rows.map(r => [r[0] + 1800, r[col] === null ? null : m.conv(r[col])]);
-    drawChart(box, m, pts, start, end, d.period * 1.5);
+    // The hour's peak, for the pollutants (null for hours before peaks were kept).
+    const pcol = m.peak ? d.fields.indexOf(m.peak) : -1;
+    const peaks = pcol < 0 ? null
+      : rows.map(r => [r[0] + 1800, r[pcol] === null || r[pcol] === undefined ? null : m.conv(r[pcol])]);
+    drawChart(box, m, pts, start, end, d.period * 1.5, peaks);
   }
 }
 
