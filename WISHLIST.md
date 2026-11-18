@@ -19,6 +19,16 @@ here is promised; it's a place to keep them.
   - watch for brownouts: its measurement peaks (~150-200 mA) share the 3.3 V
     rail with the PMSA003I fan and Wi-Fi bursts.
 
+- **SD card logging** (the card is mounted at `/SD:`; nothing is logged
+  yet). One CSV file per day (`/SD:/LOG/20261118.CSV`, 8.3 names), a line
+  per minute with every reading; buffered in RAM and appended + synced
+  every 5 minutes (losing up to 5 minutes on a crash is fine), and synced
+  before `sdcard unmount` and a shell reboot. At boot, reload the last
+  24 hours into the RAM history so it survives reboots and reflashes.
+  Readers skip malformed lines (a torn last line). Stop writing below ~5%
+  battery so a flat battery can't cut power mid-write. Later: longer web
+  views at 1-minute detail from the files; download a day's CSV.
+
 ## New hardware on hand
 
 - **INA219, next steps** (it's fitted and charted on the web page): an
@@ -47,5 +57,11 @@ here is promised; it's a place to keep them.
 
 ## Parked
 
+- **MB85RC256V FRAM** (32 KB, I2C at 0x50; Zephyr driver
+  `fujitsu,mb85rcxx`): superseded by SD card logging, which covers keeping
+  the history across reboots and much more. Only worth it if losing the
+  last few minutes ever matters. Its board has Dupont-style pins: connect
+  it with a STEMMA QT to female-socket cable (Adafruit 4397; red VCC, black
+  GND, blue SDA, yellow SCL; leave WP and A0-A2 unconnected).
 - Faster backlight reaction to room light changes.
 - Full-brightness flash at boot.

@@ -23,6 +23,7 @@ manifest:
       # Zephyr's manifest, e.g. mcuboot, is not fetched.)
       import:
         name-allowlist:
+          - fatfs                 # FAT filesystem for the microSD card
           - hal_espressif         # ESP32-C6 SoC HAL + Wi-Fi blobs
           - lvgl                  # TFT UI
           - mbedtls               # crypto for Wi-Fi (WPA2), selected by the ESP32 Wi-Fi driver

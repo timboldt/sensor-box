@@ -45,6 +45,7 @@
 #include "light.h"
 #include "ltlog.h"
 #include "readings.h"
+#include "sdcard.h"
 #include "timesync.h"
 #include "ui.h"
 #include "web.h"
@@ -366,6 +367,7 @@ int main(void)
 	baseline_init();
 	light_init();
 	ltlog_init();
+	sdcard_init();
 	timesync_init();
 	wifi_init();
 	web_init();

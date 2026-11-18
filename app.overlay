@@ -60,21 +60,33 @@
 };
 
 &spi2 {
-	cs-gpios = <&gpio0 7 GPIO_ACTIVE_LOW>;	/* D9: TFT_CS */
+	cs-gpios = <&gpio0 7 GPIO_ACTIVE_LOW>,	/* D9: TFT_CS (the display, CS 0) */
+		   <&gpio0 5 GPIO_ACTIVE_LOW>;	/* D5: SD_CS */
+
+	/*
+	 * The FeatherWing's microSD slot (src/sdcard.c). The SD driver locks
+	 * the bus for each command, so it and the display take turns.
+	 */
+	sdhc0: sdhc@1 {
+		compatible = "zephyr,sdhc-spi-slot";
+		reg = <1>;
+		status = "okay";
+		spi-max-frequency = <20000000>;
+
+		mmc {
+			compatible = "zephyr,sdmmc-disk";
+			disk-name = "SD";
+			status = "okay";
+		};
+	};
 };
 
 &gpio0 {
 	/*
-	 * The FeatherWing's microSD slot and STMPE610 touch controller share
-	 * the SPI bus but are unused. Hold their chip-selects inactive (high)
-	 * so they never drive MISO.
+	 * The FeatherWing's STMPE610 touch controller shares the SPI bus but
+	 * is unused. Hold its chip-select inactive (high) so it never drives
+	 * MISO.
 	 */
-	sd-cs-hog {
-		gpio-hog;
-		gpios = <5 GPIO_ACTIVE_LOW>;	/* D5: SD_CS */
-		output-low;
-	};
-
 	touch-cs-hog {
 		gpio-hog;
 		gpios = <6 GPIO_ACTIVE_LOW>;	/* D6: TOUCH_CS */

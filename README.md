@@ -43,6 +43,15 @@ local network.
   web page) on a log scale. In clean indoor air PM2.5 sits near 0 while this
   count still reacts to cooking, candles and dust. The web PM2.5 tile also
   notes PM1 and PM10, which indoors track PM2.5 closely.
+- **microSD card** (in the TFT FeatherWing's slot, FAT32): mounted at boot
+  at `/SD:`. Nothing is logged to it yet. Insert or swap cards with the
+  box **fully off** (USB and battery unplugged): a card that first sees
+  the display's traffic on the shared SPI bus may not answer until it's
+  power-cycled. Console: `sdcard info`, `sdcard mount` / `unmount`,
+  `sdcard format yes` (erases the card; the firmware never formats on its
+  own), `sdcard test`, and `fs ls /SD:` etc. Cards over 32 GB come as
+  exFAT: format them first, here or on a computer (macOS: Disk Utility,
+  "MS-DOS (FAT)").
 - **Battery current:** an INA219 in the battery lead measures the current
   into (charging, positive) or out of (on battery, negative) the LiPo. It's
   on the web page (tile and chart) and in the hourly log.
@@ -60,6 +69,7 @@ local network.
 
 - Adafruit ESP32-C6 Feather (STEMMA QT), with on-board MAX17048 battery gauge
 - Adafruit INA219 current sensor, inline in the battery lead (optional)
+- microSD card in the TFT FeatherWing's slot, FAT32 (optional)
 - Adafruit 2.4" 320x240 TFT FeatherWing (ILI9341), on SPI. Its touch
   controller and microSD slot are unused, but share the SPI bus, so their
   chip-selects must be held inactive.
