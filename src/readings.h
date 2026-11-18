@@ -49,6 +49,10 @@ struct readings {
 	/* Network */
 	bool wifi_ok;
 
+	/* INA219 in the battery lead: mA, positive = charging. */
+	bool batt_i_ok;
+	double batt_ma;
+
 	/* MAX17048 */
 	bool batt_ok;
 	double batt_v;

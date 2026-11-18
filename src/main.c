@@ -11,6 +11,7 @@
  *   - SGP30    TVOC (and eCO2, logged only) (sensor API, out-of-tree)
  *   - SCD-43   true CO2                     (sensor API, Zephyr's scd4x)
  *   - MAX17048 battery voltage / charge     (fuel-gauge API)
+ *   - INA219   battery current              (sensor API)
  * and shows them on the TFT (ui.c), switching its backlight off when the room
  * is dark (backlight.c). The red LED is kept off. The Boot
  * button pages through full-screen charts, and wakes the screen in a dark
@@ -60,6 +61,7 @@ static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
 /* I2C devices from app.overlay; *_OR_NULL keeps the build fine if removed. */
 static const struct device *const bme280 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(bme280));
 static const struct device *const max17048 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(max17048));
+static const struct device *const ina219 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(ina219));
 static const struct device *const pmsa003i = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(pmsa003i));
 static const struct device *const sgp30 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(sgp30));
 static const struct device *const scd4x = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(scd4x));
@@ -207,6 +209,27 @@ static void report_max17048(struct readings *r)
 	r->batt_ok = true;
 	r->batt_v = (double)v_uv.voltage / 1e6;
 	r->batt_pct = soc_pct.relative_state_of_charge;
+}
+
+static void report_ina219(struct readings *r)
+{
+	if (ina219 == NULL || !device_is_ready(ina219)) {
+		return;		/* optional: not every box has one */
+	}
+
+	/* Blocks for one triggered, averaged conversion (~70 ms). */
+	if (sensor_sample_fetch_chan(ina219, SENSOR_CHAN_CURRENT) != 0) {
+		LOG_WRN("ina219: sample fetch failed");
+		return;
+	}
+
+	struct sensor_value amps;
+
+	sensor_channel_get(ina219, SENSOR_CHAN_CURRENT, &amps);
+	r->batt_i_ok = true;
+	r->batt_ma = sensor_value_to_double(&amps) * 1000.0;
+	LOG_INF("ina219:  %+.1f mA (%s)", r->batt_ma,
+		r->batt_ma > 0.0 ? "charging" : "from battery");
 }
 
 static void report_pmsa003i(struct readings *r)
@@ -360,6 +383,7 @@ int main(void)
 			report_sgp30(&r);
 			report_scd4x(&r);
 			report_max17048(&r);
+			report_ina219(&r);
 			r.wifi_ok = wifi_is_connected();
 
 			backlight_set_ambient(r.light_ok, r.lux);

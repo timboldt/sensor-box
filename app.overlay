@@ -108,6 +108,23 @@
 		reg = <0x36>;
 	};
 
+	/*
+	 * Adafruit INA219 current sensor, inline in the battery lead (JST
+	 * plugs both sides), so it measures the battery current: positive
+	 * into the battery (charging), negative out of it. 0.1 ohm shunt;
+	 * +-160 mV range = +-1.6 A, in 50 uA steps. The shunt reading averages
+	 * 128 samples (68 ms) to smooth out Wi-Fi bursts.
+	 */
+	ina219: ina219@40 {
+		compatible = "ti,ina219";
+		reg = <0x40>;
+		shunt-milliohm = <100>;
+		lsb-microamp = <50>;
+		brng = <0>;	/* 16 V bus range: it's a 1-cell LiPo */
+		pg = <2>;	/* +-160 mV */
+		sadc = <15>;	/* 12 bit, 128 samples */
+	};
+
 	/* Adafruit PMSA003I particulate matter sensor (out-of-tree driver). */
 	pmsa003i: pmsa003i@12 {
 		compatible = "plantower,pmsa003i";

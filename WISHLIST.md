@@ -21,13 +21,9 @@ here is promised; it's a place to keep them.
 
 ## New hardware on hand
 
-- **INA219 current sensor** (inline between the LiPo and the Feather). Zephyr
-  has a driver (`ti,ina219`, address 0x40). Would give real current and
-  power, charging vs discharging, and an "about N h left" battery estimate;
-  also a way to measure what the backlight, Wi-Fi and sensors each cost.
-  Caveat: on USB it only sees the charge current, so measure consumption on
-  battery. 5-second snapshots (with its on-chip averaging) show averages,
-  not millisecond spikes.
+- **INA219, next steps** (it's fitted and charted on the web page): an
+  "about N h left" battery estimate; measure what the backlight, Wi-Fi and
+  sensors each cost; maybe show it on the device's status line.
 - **AS7341 spectral sensor** (address 0x39, alongside the TSL2591, not
   instead of it: the TSL2591 stays for lux and the dark-room backlight).
   8 visible channels plus clear, near-IR and flicker detection. Ideas:

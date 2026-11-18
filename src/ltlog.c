@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: MIT
  *
  * Readings are averaged per UTC clock hour and, when the hour ends, written
- * as one 30-byte record (averages, plus the peak of each pollutant) to an
+ * as one 32-byte record (averages, plus the peak of each pollutant) to an
  * FCB (flash circular buffer) in the "history" partition. When the buffer is
  * full the oldest 4 KB sector is erased; at 40 bytes per record in flash
  * (data padded to the 4-byte write size, plus a length header and a CRC)
@@ -53,12 +53,12 @@ static bool ready;
 /* The hour being accumulated. */
 static struct {
 	uint32_t hour;			/* UTC seconds at its start; 0 = none */
-	double sum[8];
-	uint32_t n[8];
-	double max[8];		/* used for the pollutants */
+	double sum[9];
+	uint32_t n[9];
+	double max[9];		/* used for the pollutants */
 } acc;
 
-enum field { F_TEMP, F_RH, F_PRESS, F_PM25, F_CO2, F_TVOC, F_LUX, F_PC03 };
+enum field { F_TEMP, F_RH, F_PRESS, F_PM25, F_CO2, F_TVOC, F_LUX, F_PC03, F_BATT_I };
 
 static int open_fcb(void)
 {
@@ -128,10 +128,12 @@ static bool make_record(struct ltlog_record *out)
 	for (int f = 0; f < ARRAY_SIZE(acc.sum); f++) {
 		if (acc.n[f] > 0) {
 			avg[f] = acc.sum[f] / acc.n[f];
-			rec.valid |= BIT(f);	/* LTLOG_* bits follow enum field */
+			if (f < 8) {
+				rec.valid |= BIT(f);	/* LTLOG_* bits follow enum field */
+			}
 		}
 	}
-	if (acc.hour == 0 || rec.valid == 0) {
+	if (acc.hour == 0 || (rec.valid == 0 && acc.n[F_BATT_I] == 0)) {
 		return false;
 	}
 
@@ -148,6 +150,9 @@ static bool make_record(struct ltlog_record *out)
 	rec.tvoc_max = clamp_u16(acc.max[F_TVOC]);
 	rec.pc03 = clamp_u16(avg[F_PC03]);
 	rec.pc03_max = clamp_u16(acc.max[F_PC03]);
+	rec.batt_ma10 = acc.n[F_BATT_I] == 0
+		? LTLOG_NO_CURRENT
+		: (int16_t)CLAMP(lround(avg[F_BATT_I] * 10.0), INT16_MIN + 1, INT16_MAX);
 	*out = rec;
 	return true;
 }
@@ -219,6 +224,7 @@ void ltlog_add(const struct readings *r)
 	add(F_TVOC, r->gas_ok, r->tvoc_ppb);
 	add(F_LUX, r->light_ok, r->lux);
 	add(F_PC03, r->pm_ok, r->pc03_per_l / 10.0);	/* stored per 0.1 L */
+	add(F_BATT_I, r->batt_i_ok, r->batt_ma);
 
 	k_mutex_unlock(&lock);
 }
@@ -238,7 +244,8 @@ static bool read_record(const struct flash_area *fap, const struct fcb_entry *lo
 {
 	uint16_t len = loc->fe_data_len;
 
-	if (len != LTLOG_V2_SIZE && len != LTLOG_V4_SIZE && len != sizeof(*rec)) {
+	if (len != LTLOG_V2_SIZE && len != LTLOG_V4_SIZE && len != LTLOG_V5_SIZE &&
+	    len != sizeof(*rec)) {
 		return false;
 	}
 	memset(rec, 0, sizeof(*rec));
@@ -251,6 +258,9 @@ static bool read_record(const struct flash_area *fap, const struct fcb_entry *lo
 		rec->valid &= ~LTLOG_CO2;
 		rec->co2 = 0;
 		rec->co2_max = 0;
+	}
+	if (rec->version < 6) {
+		rec->batt_ma10 = LTLOG_NO_CURRENT;
 	}
 	return true;
 }
@@ -353,8 +363,13 @@ static void print_record(const struct shell *sh, const struct ltlog_record *r)
 		snprintf(peaks, sizeof(peaks), "  peaks %u/%u/%u", r->pm25_max, r->co2_max,
 			 r->tvoc_max);
 	}
+	char amps[20] = "";
+
+	if (r->batt_ma10 != LTLOG_NO_CURRENT) {
+		snprintf(amps, sizeof(amps), "  %+.1f mA", r->batt_ma10 / 10.0);
+	}
 	shell_print(sh, "%s UTC  %6s C  %5s %%RH  %6s hPa  PM2.5 %3s  CO2 %4s  TVOC %4s  "
-		    "%s dB%s", when, temp, rh, press, pm, co2, tvoc, light, peaks);
+		    "%s dB%s%s", when, temp, rh, press, pm, co2, tvoc, light, peaks, amps);
 }
 
 static int cmd_show(const struct shell *sh, size_t argc, char **argv)

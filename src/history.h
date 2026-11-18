@@ -44,6 +44,7 @@ enum history_series {
 	H_CO2,		/* ppm (SCD-4x) */
 	H_TVOC,		/* ppb */
 	H_PC03,		/* particles >0.3 um per litre */
+	H_BATT_I,	/* battery current, mA, + = charging */
 	H_LUX,		/* lux */
 	H_COUNT,
 };

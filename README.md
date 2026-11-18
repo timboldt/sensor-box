@@ -43,6 +43,9 @@ local network.
   web page) on a log scale. In clean indoor air PM2.5 sits near 0 while this
   count still reacts to cooking, candles and dust. The web PM2.5 tile also
   notes PM1 and PM10, which indoors track PM2.5 closely.
+- **Battery current:** an INA219 in the battery lead measures the current
+  into (charging, positive) or out of (on battery, negative) the LiPo. It's
+  on the web page (tile and chart) and in the hourly log.
 - **Humidity** is shown as absolute humidity (g/m³ of water vapour), which
   follows the air's actual moisture; relative humidity swings with
   temperature. %RH is still logged, and noted on the web page's tile.
@@ -56,6 +59,7 @@ local network.
 ## Hardware
 
 - Adafruit ESP32-C6 Feather (STEMMA QT), with on-board MAX17048 battery gauge
+- Adafruit INA219 current sensor, inline in the battery lead (optional)
 - Adafruit 2.4" 320x240 TFT FeatherWing (ILI9341), on SPI. Its touch
   controller and microSD slot are unused, but share the SPI bus, so their
   chip-selects must be held inactive.

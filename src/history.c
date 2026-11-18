@@ -8,8 +8,8 @@
  * (15 min of 10-second averages) for the lively trend lines in the tiles.
  *
  * Buckets are stored as 16-bit codes (see enc[]) rather than floats, which
- * halves the long window to about 23 KB. Each series' resolution is well
- * below what's displayed (0.01 C, 0.01 g/m3, 0.1 hPa, 0.1 ug/m3, 1 ppm/ppb, 10 particles/L,
+ * halves the long window to about 26 KB. Each series' resolution is well
+ * below what's displayed (0.01 C, 0.01 g/m3, 0.1 hPa, 0.1 ug/m3, 1 ppm/ppb, 10 particles/L, 0.1 mA,
  * 0.01 dB of light).
  *
  * At boot each window is backfilled: the first valid reading of each series
@@ -46,6 +46,7 @@ static const struct {
 	[H_CO2] = { 1.0f, 0.0f },
 	[H_TVOC] = { 1.0f, 0.0f },
 	[H_PC03] = { 0.1f, 0.0f },	/* counted per 0.1 L, so in steps of 10 /L */
+	[H_BATT_I] = { 10.0f, 3200.0f },	/* -3200 .. 3353 mA */
 	[H_LUX] = { 100.0f, 100.0f },	/* -100 .. 555 dB */
 };
 
@@ -162,6 +163,7 @@ static void window_add(struct window *w, const struct readings *r, int64_t now)
 	add(w, H_TVOC, r->gas_ok, r->tvoc_ppb);
 	add(w, H_PC03, r->pm_ok, r->pc03_per_l);
 	add(w, H_LUX, r->light_ok, r->lux);
+	add(w, H_BATT_I, r->batt_i_ok, r->batt_ma);
 }
 
 void history_add(const struct readings *r)

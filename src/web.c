@@ -158,6 +158,8 @@ static int now_handler(struct http_client_ctx *client, enum http_transaction_sta
 	jprintf(&j, r.light_ok ? "%.4g" : "null", r.lux);
 	jprintf(&j, ",\"batt_v\":");
 	jnum(&j, r.batt_ok, r.batt_v, 3);
+	jprintf(&j, ",\"batt_ma\":");
+	jnum(&j, r.batt_i_ok, r.batt_ma, 1);
 	jprintf(&j, ",\"batt_pct\":");
 	jnum(&j, r.batt_ok, MIN(r.batt_pct, 100), 0);
 	jprintf(&j, ",\"pm_warming\":%s,\"gas_warming\":%s,\"co2_warming\":%s"
@@ -182,7 +184,7 @@ static int recent_handler(struct http_client_ctx *client, enum http_transaction_
 		int decimals;		/* -1: 4 significant digits */
 	} series[] = {
 		{ "temp", H_TEMP, 2 }, { "ah", H_AH, 2 },     { "press", H_PRESS, 1 },
-		{ "pm25", H_PM25, 1 }, { "co2", H_CO2, 0 } , { "tvoc", H_TVOC, 0 }, { "pc03", H_PC03, 0 },
+		{ "pm25", H_PM25, 1 }, { "co2", H_CO2, 0 } , { "tvoc", H_TVOC, 0 }, { "pc03", H_PC03, 0 }, { "batt_ma", H_BATT_I, 1 },
 		{ "lux", H_LUX, -1 },
 	};
 	static char buf[RECENT_POINTS_PER_CHUNK * 12 + 256];
@@ -319,6 +321,8 @@ static void history_row(struct jbuf *j, const struct ltlog_record *r)
 	jnum(j, r->valid & LTLOG_PC03, r->pc03 * 10.0, 0);
 	jprintf(j, ",");
 	jnum(j, r->valid & LTLOG_PC03, r->pc03_max * 10.0, 0);
+	jprintf(j, ",");
+	jnum(j, r->batt_ma10 != LTLOG_NO_CURRENT, r->batt_ma10 / 10.0, 1);
 	jprintf(j, "]");
 }
 
@@ -358,7 +362,7 @@ static int history_handler(struct http_client_ctx *client, enum http_transaction
 		rsp->header_count = ARRAY_SIZE(json_headers);
 		jprintf(&j, "{\"period\":3600,\"fields\":[\"t\",\"temp\",\"rh\",\"press\","
 			    "\"pm25\",\"co2\",\"tvoc\",\"lux\",\"pm25_max\",\"co2_max\","
-			    "\"tvoc_max\",\"pc03\",\"pc03_max\"],\"rows\":[");
+			    "\"tvoc_max\",\"pc03\",\"pc03_max\",\"batt_ma\"],\"rows\":[");
 	}
 
 	struct ltlog_record rec;

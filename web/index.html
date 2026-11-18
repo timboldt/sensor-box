@@ -105,6 +105,10 @@ const METRICS = [
   // (cooking, candles, dust). Log scale: it can jump a hundredfold.
   { key: "pc03",  name: "Particles >0.3 µm", unit: () => "/L", conv: v => v, dec: 0, span: () => 1,
     log: true, logFloor: 10, kilo: true, warm: "pm_warming", peak: "pc03_max" },
+  // Battery current (INA219 in the battery lead): + charging, − running on battery.
+  { key: "batt_ma", name: "Battery current", unit: () => "mA", conv: v => v, dec: 0, span: () => 20,
+    note: d => d.batt_ma === null || d.batt_ma === undefined ? "no sensor"
+      : Math.abs(d.batt_ma) < 2 ? "idle" : d.batt_ma > 0 ? "charging" : "on battery" },
   // Light as decibels re 1 lux (0 dB = 1 lux, -30 dB = 0.001 lux).
   { key: "lux",   name: "Light", unit: () => "dB", conv: v => 10 * Math.log10(Math.max(v, 1e-5)),
     dec: v => Math.abs(v) < 10 ? 1 : 0, span: () => 10, luxNote: true },
