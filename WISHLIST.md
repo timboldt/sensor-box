@@ -19,15 +19,12 @@ here is promised; it's a place to keep them.
   - watch for brownouts: its measurement peaks (~150-200 mA) share the 3.3 V
     rail with the PMSA003I fan and Wi-Fi bursts.
 
-- **SD card logging** (the card is mounted at `/SD:`; nothing is logged
-  yet). One CSV file per day (`/SD:/LOG/20261118.CSV`, 8.3 names), a line
-  per minute with every reading; buffered in RAM and appended + synced
-  every 5 minutes (losing up to 5 minutes on a crash is fine), and synced
-  before `sdcard unmount` and a shell reboot. At boot, reload the last
-  24 hours into the RAM history so it survives reboots and reflashes.
-  Readers skip malformed lines (a torn last line). Stop writing below ~5%
-  battery so a flat battery can't cut power mid-write. Later: longer web
-  views at 1-minute detail from the files; download a day's CSV.
+- **SD card logging, next steps** (minute CSV files are written to
+  `/SD:/LOG/`): at boot, once the clock is set, reload the last 24 hours
+  from the files into the RAM history so the charts survive reboots and
+  reflashes. Then the web page: choose arbitrary intervals at sensible
+  detail (1-minute from the files for recent days, coarser further back,
+  "All" downsampled rather than everything); download a day's CSV.
 
 ## New hardware on hand
 

@@ -50,6 +50,7 @@ static struct fs_mount_t mnt = {
 	.flags = FS_MOUNT_FLAG_NO_FORMAT,
 };
 static bool mounted;
+static void (*unmount_hook)(void);
 
 /*
  * Wake the card the way the SD spec asks: at least 74 clocks at <= 400 kHz
@@ -148,6 +149,58 @@ bool sdcard_ready(void)
 	return mounted;
 }
 
+void sdcard_set_unmount_hook(void (*hook)(void))
+{
+	unmount_hook = hook;
+}
+
+int sdcard_append(const char *dir, const char *path, const char *header, const char *data,
+		  size_t len)
+{
+	struct fs_dirent st;
+	struct fs_file_t f;
+	int ret;
+
+	k_mutex_lock(&lock, K_FOREVER);
+	if (!mounted) {
+		k_mutex_unlock(&lock);
+		return -ENODEV;
+	}
+
+	if (fs_stat(dir, &st) == -ENOENT) {
+		ret = fs_mkdir(dir);
+		if (ret != 0 && ret != -EEXIST) {
+			goto out;
+		}
+	}
+
+	fs_file_t_init(&f);
+	ret = fs_open(&f, path, FS_O_CREATE | FS_O_WRITE | FS_O_APPEND);
+	if (ret != 0) {
+		goto out;
+	}
+
+	ssize_t n = 0;
+
+	/* An empty file (new, or created just before a crash) gets the header. */
+	if (header != NULL && fs_seek(&f, 0, FS_SEEK_END) == 0 && fs_tell(&f) == 0) {
+		n = fs_write(&f, header, strlen(header));
+	}
+	if (n >= 0) {
+		n = fs_write(&f, data, len);
+		if (n >= 0 && (size_t)n != len) {
+			n = -ENOSPC;	/* card full */
+		}
+	}
+	ret = fs_close(&f);
+	if (n < 0) {
+		ret = (int)n;
+	}
+out:
+	k_mutex_unlock(&lock);
+	return ret;
+}
+
 /* ---- console ---- */
 
 static int cmd_info(const struct shell *sh, size_t argc, char **argv)
@@ -205,6 +258,9 @@ static int cmd_mount(const struct shell *sh, size_t argc, char **argv)
 
 static int cmd_unmount(const struct shell *sh, size_t argc, char **argv)
 {
+	if (unmount_hook != NULL) {
+		unmount_hook();
+	}
 	k_mutex_lock(&lock, K_FOREVER);
 	int ret = do_unmount();
 

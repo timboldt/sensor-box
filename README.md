@@ -44,7 +44,13 @@ local network.
   count still reacts to cooking, candles and dust. The web PM2.5 tile also
   notes PM1 and PM10, which indoors track PM2.5 closely.
 - **microSD card** (in the TFT FeatherWing's slot, FAT32): mounted at boot
-  at `/SD:`. Nothing is logged to it yet. Insert or swap cards with the
+  at `/SD:`. Every minute's readings go to one CSV file per UTC day,
+  `LOG/YYYYMMDD.CSV`: the time (start of the minute, UTC), each reading's
+  average over the minute and the pollutants' peaks; empty = no reading.
+  Lines are written every 5 minutes, so a crash or reboot loses at most
+  the last few; logging pauses while the battery is nearly flat. `sdlog`
+  shows the state, `sdlog flush` writes now (`sdcard unmount` does too:
+  use it before pulling the card while running). Insert or swap cards with the
   box **fully off** (USB and battery unplugged): a card that first sees
   the display's traffic on the shared SPI bus may not answer until it's
   power-cycled. Console: `sdcard info`, `sdcard mount` / `unmount`,

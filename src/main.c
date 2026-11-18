@@ -46,6 +46,7 @@
 #include "ltlog.h"
 #include "readings.h"
 #include "sdcard.h"
+#include "sdlog.h"
 #include "timesync.h"
 #include "ui.h"
 #include "web.h"
@@ -368,6 +369,7 @@ int main(void)
 	light_init();
 	ltlog_init();
 	sdcard_init();
+	sdlog_init();
 	timesync_init();
 	wifi_init();
 	web_init();
@@ -391,6 +393,7 @@ int main(void)
 			backlight_set_ambient(r.light_ok, r.lux);
 			history_add(&r);
 			ltlog_add(&r);
+			sdlog_add(&r);
 			web_update(&r);
 			baseline_tick();
 

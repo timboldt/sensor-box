@@ -9,6 +9,7 @@
 #define SENSOR_BOX_SDCARD_H_
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #define SDCARD_MNT "/SD:"
 
@@ -17,5 +18,17 @@ void sdcard_init(void);
 
 /* Whether a card is mounted. */
 bool sdcard_ready(void);
+
+/*
+ * Append len bytes of data to the file `path` (e.g. SDCARD_MNT "/LOG/X.CSV"),
+ * creating it, and its directory `dir` if missing. A new (or empty) file
+ * gets `header` first. The file is closed, so everything is on the card
+ * when this returns. Returns 0 or a negative error (-ENODEV: no card).
+ */
+int sdcard_append(const char *dir, const char *path, const char *header, const char *data,
+		  size_t len);
+
+/* Called (once) before "sdcard unmount", e.g. to write out buffered data. */
+void sdcard_set_unmount_hook(void (*hook)(void));
 
 #endif /* SENSOR_BOX_SDCARD_H_ */
