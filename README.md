@@ -183,6 +183,11 @@ scripts/flash.sh                                     # west flash
 `console.py` leaves the board running; some ways of opening the ESP32-C6's
 USB serial port reset it.
 
+## Wishlist
+
+Ideas and loose ends (new sensors, smaller improvements) are kept in
+[WISHLIST.md](WISHLIST.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
