@@ -9,7 +9,7 @@
  *
  * Buckets are stored as 16-bit codes (see enc[]) rather than floats, which
  * halves the long window to about 20 KB. Each series' resolution is well
- * below what's displayed (0.01 C, 0.01 %RH, 0.1 hPa, 0.1 ug/m3, 1 ppm/ppb,
+ * below what's displayed (0.01 C, 0.01 g/m3, 0.1 hPa, 0.1 ug/m3, 1 ppm/ppb,
  * 0.01 dB of light).
  *
  * At boot each window is backfilled: the first valid reading of each series
@@ -40,7 +40,7 @@ static const struct {
 	float offset;
 } enc[H_COUNT] = {
 	[H_TEMP] = { 100.0f, 100.0f },	/* -100 .. 555 C */
-	[H_RH] = { 100.0f, 0.0f },
+	[H_AH] = { 100.0f, 0.0f },
 	[H_PRESS] = { 10.0f, 0.0f },
 	[H_PM25] = { 10.0f, 0.0f },
 	[H_ECO2] = { 1.0f, 0.0f },	/* the SGP30 tops out at 60000 */
@@ -154,7 +154,7 @@ static void window_add(struct window *w, const struct readings *r, int64_t now)
 	}
 
 	add(w, H_TEMP, r->climate_ok, r->temp_c);
-	add(w, H_RH, r->climate_ok, r->rh_pct);
+	add(w, H_AH, r->climate_ok, r->ah_g_m3);
 	add(w, H_PRESS, r->climate_ok, r->press_sl_hpa);
 	add(w, H_PM25, r->pm_ok, r->pm2_5);
 	add(w, H_ECO2, r->gas_ok, r->eco2_ppm);

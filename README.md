@@ -33,6 +33,9 @@ local network.
   peak PM2.5, eCO2 and TVOC of each hour are kept too, in flash (128 KB,
   about 4½ months, oldest dropped first), kept across reboots and reflashes.
   `ltlog show [n]` lists the newest records (UTC), `ltlog clear` erases them.
+- **Humidity** is shown as absolute humidity (g/m³ of water vapour), which
+  follows the air's actual moisture; relative humidity swings with
+  temperature. %RH is still logged, and noted on the web page's tile.
 - **Light level** is shown in decibels relative to 1 lux (0 dB = 1 lux,
   +20 dB = 100 lux, -20 dB = 0.01 lux). The TSL2591's gain is adjusted
   automatically (x1 to x9200), so it reads from daylight down to about

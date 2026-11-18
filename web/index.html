@@ -86,7 +86,10 @@ let US = true;  // replaced by /api/now
 const METRICS = [
   { key: "temp",  name: "Temperature", unit: () => US ? "°F" : "°C",
     conv: v => US ? v * 9 / 5 + 32 : v, dec: 1, span: () => US ? 2 : 1 },
-  { key: "rh",    name: "Humidity", unit: () => "%RH", conv: v => v, dec: 0, span: () => 5, min0: true },
+  // Absolute humidity: the air's actual moisture, which %RH hides by swinging
+  // with temperature. The tile notes %RH as well.
+  { key: "ah",    name: "Humidity", unit: () => "g/m³", conv: v => v, dec: 1, span: () => 1, min0: true,
+    note: d => d.rh === null || d.rh === undefined ? "" : d.rh.toFixed(0) + " %RH" },
   { key: "press", name: "Pressure (MSL)", unit: () => US ? "inHg" : "hPa",
     conv: v => US ? v / 33.8639 : v, dec: () => US ? 2 : 0, span: () => US ? 0.05 : 2 },
   { key: "pm25",  name: "PM2.5", unit: () => "µg/m³", conv: v => v, dec: 0, span: () => 10,
@@ -132,7 +135,7 @@ function renderTiles(d) {
     }
     val.append(el("span", "unit", m.unit()));
     t.append(val);
-    let note = m.warm && d[m.warm] ? "warming up" : "";
+    let note = m.warm && d[m.warm] ? "warming up" : m.note ? m.note(d) : "";
     if (m.luxNote && raw !== null && raw !== undefined) {
       note = (raw >= 10 ? raw.toFixed(0) : raw.toPrecision(2)) + " lux";
     }
@@ -288,6 +291,23 @@ let range = "6h";
 let lastData = null;     // what renderCharts() last drew, for redraw on resize
 let lastFetch = 0;
 
+// Absolute humidity (g/m³) from temperature (°C) and %RH: the Magnus formula,
+// as on the device.
+function absHumidity(t, rh) {
+  return 216.7 * (rh / 100) * 6.112 * Math.exp(17.62 * t / (243.12 + t)) / (273.15 + t);
+}
+
+// A metric's value in a row of /api/history (metric units, or null). The log
+// keeps %RH, so absolute humidity is worked out from the hour's averages.
+function rowValue(d, r, key) {
+  if (key === "ah") {
+    const t = r[d.fields.indexOf("temp")], rh = r[d.fields.indexOf("rh")];
+    return t === null || rh === null ? null : absHumidity(t, rh);
+  }
+  const col = d.fields.indexOf(key);
+  return col < 0 || r[col] === null || r[col] === undefined ? null : r[col];
+}
+
 // Hourly rows, last record per hour (a re-written hour supersedes), oldest first.
 function hourlyRows(d) {
   const byT = new Map();
@@ -309,9 +329,9 @@ function liveCharts(box, cfg, d, early) {
     const n = arr.length;
     const live = arr.map((v, i) => [last - (n - 1 - i) * d.period, v === null ? null : m.conv(v)])
                     .filter(p => p[0] - d.period / 2 >= boot);
-    const col = early ? early.fields.indexOf(m.key) : -1;
     // Each hourly average is plotted at the middle of its hour.
-    const hourly = rows.map(r => [r[0] + 1800, r[col] === null ? null : m.conv(r[col])]);
+    const hourly = rows.map(r => { const v = rowValue(early, r, m.key);
+                                   return [r[0] + 1800, v === null ? null : m.conv(v)]; });
     // The hourly part keeps its peaks (the live part is detailed enough to show them).
     const pcol = early && m.peak ? early.fields.indexOf(m.peak) : -1;
     const peaks = pcol < 0 ? null
@@ -327,8 +347,8 @@ function hourlyCharts(box, cfg, d) {
   const end = nowS();
   const start = cfg.days ? end - cfg.days * 86400 : (rows.length ? rows[0][0] : end - 86400);
   for (const m of METRICS) {
-    const col = d.fields.indexOf(m.key);
-    const pts = rows.map(r => [r[0] + 1800, r[col] === null ? null : m.conv(r[col])]);
+    const pts = rows.map(r => { const v = rowValue(d, r, m.key);
+                                return [r[0] + 1800, v === null ? null : m.conv(v)]; });
     // The hour's peak, for the pollutants (null for hours before peaks were kept).
     const pcol = m.peak ? d.fields.indexOf(m.peak) : -1;
     const peaks = pcol < 0 ? null

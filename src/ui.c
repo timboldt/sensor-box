@@ -10,7 +10,7 @@
  *   | light          9:41 PM      wifi  battery |  status bar (all pages)
  *   +--------------+--------------+--------------+
  *   |     Temp     |   Humidity   |   Pressure   |  title
- *   |     70.5     |      64      |    30.07     |  current value
+ *   |     70.5     |     9.8      |    30.07     |  current value
  *   |  ___/‾‾\__   |  ‾‾\___/‾    |  ____/‾‾‾    |  trend, last 15 min
  *   +--------------+--------------+--------------+
  *   |    PM2.5     |     eCO2     |     TVOC     |  air-quality values
@@ -30,7 +30,8 @@
  * After RETURN_MS without a press it goes back to the dashboard.
  *
  * On the dashboard units are left off to keep the tiles uncluttered:
- * temperature is in F or C (CONFIG_SENSOR_BOX_US_UNITS), humidity %RH,
+ * temperature is in F or C (CONFIG_SENSOR_BOX_US_UNITS), humidity absolute
+ * (g/m3: it follows the air's moisture, where %RH swings with temperature),
  * pressure sea-level (MSL) inHg or hPa, PM2.5 ug/m3, eCO2 ppm, TVOC ppb.
  * The chart pages show the unit.
  *
@@ -96,7 +97,7 @@ LOG_MODULE_REGISTER(ui, LOG_LEVEL_INF);
 
 enum tile_id {
 	T_TEMP,
-	T_RH,
+	T_AH,
 	T_PRESS,
 	T_PM25,
 	T_ECO2,
@@ -119,7 +120,7 @@ static const struct {
 } tile_def[T_COUNT] = {
 	[T_TEMP] = { "Temp", "Temperature", US ? "\xc2\xb0" "F" : "\xc2\xb0" "C",
 		     1, H_TEMP, US ? 2.0f : 1.0f },
-	[T_RH] = { "Humidity", "Humidity", "%RH", 0, H_RH, 5.0f },
+	[T_AH] = { "Humidity", "Absolute humidity", "g/m3", 1, H_AH, 1.0f },
 	[T_PRESS] = { "Pressure", "Pressure (sea level)", US ? "inHg" : "hPa",
 		      US ? 2 : 0, H_PRESS, US ? 0.05f : 2.0f },
 	[T_PM25] = { "PM2.5", "PM2.5", "ug/m3", 0, H_PM25, 10.0f, false, true },
@@ -210,8 +211,8 @@ static bool current_value(enum tile_id id, const struct readings *r, float *v)
 	case T_TEMP:
 		*v = to_display(id, (float)r->temp_c);
 		return r->climate_ok;
-	case T_RH:
-		*v = (float)r->rh_pct;
+	case T_AH:
+		*v = (float)r->ah_g_m3;
 		return r->climate_ok;
 	case T_PRESS:
 		*v = to_display(id, (float)r->press_sl_hpa);

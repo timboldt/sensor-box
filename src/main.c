@@ -83,8 +83,8 @@ static double sea_level_hpa(double station_hpa, double alt_m, double t_c)
 	return station_hpa * pow(1.0 - lapse / (t_c + lapse + 273.15), -5.257);
 }
 
-/* Push absolute humidity to the SGP30 for on-chip compensation. */
-static void feed_sgp30_humidity(double temp_c, double rh_pct)
+/* Push absolute humidity (g/m^3) to the SGP30 for on-chip compensation. */
+static void feed_sgp30_humidity(double ah_g_m3)
 {
 	if (sgp30 == NULL || !device_is_ready(sgp30)) {
 		return;
@@ -92,7 +92,7 @@ static void feed_sgp30_humidity(double temp_c, double rh_pct)
 
 	struct sensor_value ah;
 
-	sensor_value_from_double(&ah, abs_humidity_g_m3(temp_c, rh_pct));
+	sensor_value_from_double(&ah, ah_g_m3);
 	sensor_attr_set(sgp30, SENSOR_CHAN_ALL,
 			(enum sensor_attribute)SENSOR_ATTR_SGP30_ABS_HUMIDITY, &ah);
 }
@@ -121,18 +121,19 @@ static void report_bme280(struct readings *r)
 
 	double press_hpa = sensor_value_to_double(&press) * 10.0;
 	double press_sl_hpa = sea_level_hpa(press_hpa, CONFIG_SENSOR_BOX_ALTITUDE_M, temp_c);
+	double ah_g_m3 = abs_humidity_g_m3(temp_c, rh_pct);
 
 	LOG_INF("bme280:  %.2f C  %.2f %%RH  %.2f hPa (%.2f hPa MSL)  (AH %.2f g/m3)",
-		temp_c, rh_pct, press_hpa, press_sl_hpa,
-		abs_humidity_g_m3(temp_c, rh_pct));
+		temp_c, rh_pct, press_hpa, press_sl_hpa, ah_g_m3);
 
 	r->climate_ok = true;
 	r->temp_c = temp_c;
 	r->rh_pct = rh_pct;
+	r->ah_g_m3 = ah_g_m3;
 	r->press_hpa = press_hpa;
 	r->press_sl_hpa = press_sl_hpa;
 
-	feed_sgp30_humidity(temp_c, rh_pct);
+	feed_sgp30_humidity(ah_g_m3);
 }
 
 static void report_tsl2591(struct readings *r)

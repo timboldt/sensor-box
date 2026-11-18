@@ -38,7 +38,7 @@ enum history_window {
 
 enum history_series {
 	H_TEMP,		/* degC */
-	H_RH,		/* %RH */
+	H_AH,		/* g/m3, absolute humidity */
 	H_PRESS,	/* hPa, sea level */
 	H_PM25,		/* ug/m3 */
 	H_ECO2,		/* ppm */

@@ -15,6 +15,7 @@ struct readings {
 	bool climate_ok;
 	double temp_c;
 	double rh_pct;
+	double ah_g_m3;		/* absolute humidity, from temp and RH */
 	double press_hpa;	/* station (absolute) pressure */
 	double press_sl_hpa;	/* adjusted to sea level */
 

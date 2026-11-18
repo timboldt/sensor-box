@@ -137,6 +137,8 @@ static int now_handler(struct http_client_ctx *client, enum http_transaction_sta
 	jnum(&j, r.climate_ok, r.temp_c, 2);
 	jprintf(&j, ",\"rh\":");
 	jnum(&j, r.climate_ok, r.rh_pct, 1);
+	jprintf(&j, ",\"ah\":");
+	jnum(&j, r.climate_ok, r.ah_g_m3, 2);
 	jprintf(&j, ",\"press\":");
 	jnum(&j, r.climate_ok, r.press_sl_hpa, 1);
 	jprintf(&j, ",\"pm1\":");
@@ -174,7 +176,7 @@ static int recent_handler(struct http_client_ctx *client, enum http_transaction_
 		enum history_series s;
 		int decimals;		/* -1: 4 significant digits */
 	} series[] = {
-		{ "temp", H_TEMP, 2 }, { "rh", H_RH, 1 },     { "press", H_PRESS, 1 },
+		{ "temp", H_TEMP, 2 }, { "ah", H_AH, 2 },     { "press", H_PRESS, 1 },
 		{ "pm25", H_PM25, 1 }, { "eco2", H_ECO2, 0 }, { "tvoc", H_TVOC, 0 },
 		{ "lux", H_LUX, -1 },
 	};
