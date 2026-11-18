@@ -119,15 +119,16 @@ static const struct {
 	float min_span;			/* smallest trend y-range, display units */
 	bool log_scale;			/* chart log10(value); min_span in decades */
 	bool cap_spikes;		/* y range ignores rare huge spikes (see fill_trend) */
+	bool min0;			/* can't be negative: y range never dips below 0 */
 } tile_def[T_COUNT] = {
 	[T_TEMP] = { "Temp", "Temperature", US ? "\xc2\xb0" "F" : "\xc2\xb0" "C",
 		     1, H_TEMP, US ? 2.0f : 1.0f },
-	[T_AH] = { "Humidity", "Absolute humidity", "g/m3", 1, H_AH, 1.0f },
+	[T_AH] = { "Humidity", "Absolute humidity", "g/m3", 1, H_AH, 1.0f, false, false, true },
 	[T_PRESS] = { "Pressure", "Pressure (sea level)", US ? "inHg" : "hPa",
 		      US ? 2 : 0, H_PRESS, US ? 0.05f : 2.0f },
-	[T_PM25] = { "PM2.5", "PM2.5", "ug/m3", 0, H_PM25, 10.0f, false, true },
-	[T_CO2] = { "CO2", "CO2", "ppm", 0, H_CO2, 200.0f, false, true },
-	[T_TVOC] = { "TVOC", "TVOC", "ppb", 0, H_TVOC, 50.0f, false, true },
+	[T_PM25] = { "PM2.5", "PM2.5", "ug/m3", 0, H_PM25, 10.0f, false, true, true },
+	[T_CO2] = { "CO2", "CO2", "ppm", 0, H_CO2, 200.0f, false, true, true },
+	[T_TVOC] = { "TVOC", "TVOC", "ppb", 0, H_TVOC, 50.0f, false, true, true },
 	[T_PC03] = { "Particles", "Particles >0.3 um", "/L", 0, H_PC03, 1.0f, true },
 	[T_LIGHT] = { "Light", "Light", "dB", 0, H_LUX, 10.0f, false },
 };
@@ -378,6 +379,11 @@ static bool fill_trend(enum tile_id id, lv_obj_t *chart, int32_t *vals, bool sho
 		span *= 1.0f + 2.0f * margin_frac;
 		*lo_out = mid - span / 2.0f;
 		*hi_out = mid + span / 2.0f;
+		if (tile_def[id].min0 && *lo_out < 0.0f) {
+			/* Shift up rather than show a negative axis (as the web page does). */
+			*hi_out -= *lo_out;
+			*lo_out = 0.0f;
+		}
 		if (capped) {
 			int32_t top = (int32_t)lroundf(*hi_out * TREND_SCALE);
 
