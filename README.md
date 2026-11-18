@@ -21,8 +21,13 @@ local network.
   hold Boot while resetting or plugging in (that enters the ESP32-C6
   download mode).
 - **Warm-up:** PM2.5 shows "warming up" for the first 30 s after power-up
-  (fan spin-up), and eCO2/TVOC for the SGP30's first ~15 s.
-- **SGP30 baseline:** the eCO2/TVOC sensor learns a clean-air baseline over
+  (fan spin-up), TVOC for the SGP30's first ~15 s, and CO2 until the SCD-43's
+  first measurement (~5 s).
+- **CO2** comes from an SCD-43 (true CO2, 400–5000 ppm), corrected with the
+  BME280's pressure. Without one the CO2 tile says "no sensor". The SGP30's
+  eCO2 is only an estimate from TVOC, so it's no longer shown (it's still in
+  the console log).
+- **SGP30 baseline:** the TVOC sensor learns a clean-air baseline over
   ~12 h. The firmware saves it to flash (first after 12 h of uptime, then
   hourly) and restores it at boot, so a reboot doesn't restart the learning.
   Reflashing keeps it. Each save is timestamped, and at boot the baseline is
@@ -30,7 +35,7 @@ local network.
   limit); with no network for 2 minutes it's restored without the check.
   `sgp30 baseline [save|clear]` on the console shows, saves or clears it.
 - **Long-term history:** every reading is averaged per clock hour, and the
-  peak PM2.5, eCO2 and TVOC of each hour are kept too, in flash (128 KB,
+  peak PM2.5, CO2 and TVOC of each hour are kept too, in flash (128 KB,
   about 4½ months, oldest dropped first), kept across reboots and reflashes.
   `ltlog show [n]` lists the newest records (UTC), `ltlog clear` erases them.
 - **Humidity** is shown as absolute humidity (g/m³ of water vapour), which
@@ -53,7 +58,7 @@ local network.
     (GPIO2), so the firmware can switch the backlight off when the room is
     dark. Without that wire the backlight is always on.
 - I2C sensors, daisy-chained over STEMMA QT: PMSA003I (PM), BME280
-  (temp/humidity/pressure), TSL2591 (light), SGP30 (eCO2/TVOC)
+  (temp/humidity/pressure), TSL2591 (light), SGP30 (TVOC), SCD-43 (CO2)
 
 No RTC: wall-clock time, when needed, will come from SNTP over Wi-Fi.
 

@@ -58,7 +58,7 @@ static struct {
 	double max[7];		/* used for the pollutants */
 } acc;
 
-enum field { F_TEMP, F_RH, F_PRESS, F_PM25, F_ECO2, F_TVOC, F_LUX };
+enum field { F_TEMP, F_RH, F_PRESS, F_PM25, F_CO2, F_TVOC, F_LUX };
 
 static int open_fcb(void)
 {
@@ -139,12 +139,12 @@ static bool make_record(struct ltlog_record *out)
 	rec.rh10 = clamp_u16(avg[F_RH] * 10.0);
 	rec.press10 = clamp_u16(avg[F_PRESS] * 10.0);
 	rec.pm25 = clamp_u16(avg[F_PM25]);
-	rec.eco2 = clamp_u16(avg[F_ECO2]);
+	rec.co2 = clamp_u16(avg[F_CO2]);
 	rec.tvoc = clamp_u16(avg[F_TVOC]);
 	rec.light = (uint16_t)(int16_t)CLAMP(lround(light_db(avg[F_LUX]) * 100.0), INT16_MIN,
 					     INT16_MAX);
 	rec.pm25_max = clamp_u16(acc.max[F_PM25]);
-	rec.eco2_max = clamp_u16(acc.max[F_ECO2]);
+	rec.co2_max = clamp_u16(acc.max[F_CO2]);
 	rec.tvoc_max = clamp_u16(acc.max[F_TVOC]);
 	*out = rec;
 	return true;
@@ -213,7 +213,7 @@ void ltlog_add(const struct readings *r)
 	add(F_RH, r->climate_ok, r->rh_pct);
 	add(F_PRESS, r->climate_ok, r->press_sl_hpa);
 	add(F_PM25, r->pm_ok, r->pm2_5);
-	add(F_ECO2, r->gas_ok, r->eco2_ppm);
+	add(F_CO2, r->co2_ok, r->co2_ppm);
 	add(F_TVOC, r->gas_ok, r->tvoc_ppb);
 	add(F_LUX, r->light_ok, r->lux);
 
@@ -239,8 +239,17 @@ static bool read_record(const struct flash_area *fap, const struct fcb_entry *lo
 		return false;
 	}
 	memset(rec, 0, sizeof(*rec));
-	return flash_area_read(fap, loc->fe_sector->fs_off + loc->fe_data_off, rec, len) == 0 &&
-	       ltlog_record_known(rec);
+	if (flash_area_read(fap, loc->fe_sector->fs_off + loc->fe_data_off, rec, len) != 0 ||
+	    !ltlog_record_known(rec)) {
+		return false;
+	}
+	if (rec->version < 4) {
+		/* That slot held the SGP30's eCO2 estimate, not CO2. */
+		rec->valid &= ~LTLOG_CO2;
+		rec->co2 = 0;
+		rec->co2_max = 0;
+	}
+	return true;
 }
 
 struct walk_ctx {
@@ -324,7 +333,7 @@ static void print_record(const struct shell *sh, const struct ltlog_record *r)
 	time_t t = r->t;
 	struct tm tm;
 	char when[24];
-	char temp[12], rh[12], press[12], pm[12], eco2[12], tvoc[12], light[16];
+	char temp[12], rh[12], press[12], pm[12], co2[12], tvoc[12], light[16];
 
 	gmtime_r(&t, &tm);
 	strftime(when, sizeof(when), "%Y-%m-%d %H:%M", &tm);
@@ -332,17 +341,17 @@ static void print_record(const struct shell *sh, const struct ltlog_record *r)
 	FIELD(rh, LTLOG_RH, "%.1f", r->rh10 / 10.0);
 	FIELD(press, LTLOG_PRESS, "%.1f", r->press10 / 10.0);
 	FIELD(pm, LTLOG_PM25, "%u", r->pm25);
-	FIELD(eco2, LTLOG_ECO2, "%u", r->eco2);
+	FIELD(co2, LTLOG_CO2, "%u", r->co2);
 	FIELD(tvoc, LTLOG_TVOC, "%u", r->tvoc);
 	FIELD(light, LTLOG_LUX, "%.1f", ltlog_light_db(r));
 	char peaks[40] = "";
 
 	if (ltlog_has_peaks(r)) {
-		snprintf(peaks, sizeof(peaks), "  peaks %u/%u/%u", r->pm25_max, r->eco2_max,
+		snprintf(peaks, sizeof(peaks), "  peaks %u/%u/%u", r->pm25_max, r->co2_max,
 			 r->tvoc_max);
 	}
-	shell_print(sh, "%s UTC  %6s C  %5s %%RH  %6s hPa  PM2.5 %3s  eCO2 %4s  TVOC %4s  "
-		    "%s dB%s", when, temp, rh, press, pm, eco2, tvoc, light, peaks);
+	shell_print(sh, "%s UTC  %6s C  %5s %%RH  %6s hPa  PM2.5 %3s  CO2 %4s  TVOC %4s  "
+		    "%s dB%s", when, temp, rh, press, pm, co2, tvoc, light, peaks);
 }
 
 static int cmd_show(const struct shell *sh, size_t argc, char **argv)

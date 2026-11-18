@@ -30,11 +30,20 @@ struct readings {
 	int32_t pm2_5;
 	int32_t pm10;
 
-	/* SGP30. gas_warming: alive but still in its ~15 s warm-up. */
+	/* SGP30 (its eCO2, an estimate from TVOC, is only logged to the console).
+	 * gas_warming: alive but still in its ~15 s warm-up.
+	 */
 	bool gas_ok;
 	bool gas_warming;
-	int32_t eco2_ppm;
 	int32_t tvoc_ppb;
+
+	/* SCD-4x true CO2, ppm. co2_present: the sensor answered at boot;
+	 * co2_warming: present, but no measurement yet (one every 5 s).
+	 */
+	bool co2_present;
+	bool co2_ok;
+	bool co2_warming;
+	int32_t co2_ppm;
 
 	/* Network */
 	bool wifi_ok;

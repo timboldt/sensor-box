@@ -119,6 +119,19 @@
 		compatible = "sensirion,sgp30";
 		reg = <0x58>;
 	};
+
+	/*
+	 * Adafruit SCD-43 true (NDIR photoacoustic) CO2 sensor. Zephyr's scd4x
+	 * driver knows the SCD40 and SCD41; the SCD43 shares the SCD41's command
+	 * set, so it's declared as one. Until it's plugged in, its driver fails
+	 * to initialise at boot (one error in the log) and the CO2 tile says
+	 * "no sensor".
+	 */
+	scd4x: scd4x@62 {
+		compatible = "sensirion,scd41";
+		reg = <0x62>;
+		mode = <0>;	/* periodic, a measurement every 5 s */
+	};
 };
 
 /*

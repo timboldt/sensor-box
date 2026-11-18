@@ -43,7 +43,7 @@ static const struct {
 	[H_AH] = { 100.0f, 0.0f },
 	[H_PRESS] = { 10.0f, 0.0f },
 	[H_PM25] = { 10.0f, 0.0f },
-	[H_ECO2] = { 1.0f, 0.0f },	/* the SGP30 tops out at 60000 */
+	[H_CO2] = { 1.0f, 0.0f },
 	[H_TVOC] = { 1.0f, 0.0f },
 	[H_LUX] = { 100.0f, 100.0f },	/* -100 .. 555 dB */
 };
@@ -157,7 +157,7 @@ static void window_add(struct window *w, const struct readings *r, int64_t now)
 	add(w, H_AH, r->climate_ok, r->ah_g_m3);
 	add(w, H_PRESS, r->climate_ok, r->press_sl_hpa);
 	add(w, H_PM25, r->pm_ok, r->pm2_5);
-	add(w, H_ECO2, r->gas_ok, r->eco2_ppm);
+	add(w, H_CO2, r->co2_ok, r->co2_ppm);
 	add(w, H_TVOC, r->gas_ok, r->tvoc_ppb);
 	add(w, H_LUX, r->light_ok, r->lux);
 }

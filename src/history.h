@@ -41,7 +41,7 @@ enum history_series {
 	H_AH,		/* g/m3, absolute humidity */
 	H_PRESS,	/* hPa, sea level */
 	H_PM25,		/* ug/m3 */
-	H_ECO2,		/* ppm */
+	H_CO2,		/* ppm (SCD-4x) */
 	H_TVOC,		/* ppb */
 	H_LUX,		/* lux */
 	H_COUNT,

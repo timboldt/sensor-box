@@ -8,14 +8,16 @@
  *   - BME280   temp / humidity / pressure   (sensor API)
  *   - TSL2591  ambient light / IR           (sensor API)
  *   - PMSA003I PM1.0 / 2.5 / 10             (sensor API, out-of-tree)
- *   - SGP30    eCO2 / TVOC                  (sensor API, out-of-tree)
+ *   - SGP30    TVOC (and eCO2, logged only) (sensor API, out-of-tree)
+ *   - SCD-43   true CO2                     (sensor API, Zephyr's scd4x)
  *   - MAX17048 battery voltage / charge     (fuel-gauge API)
  * and shows them on the TFT (ui.c), switching its backlight off when the room
  * is dark (backlight.c), plus the 1 Hz heartbeat + LED blink. The Boot
  * button pages through full-screen charts, and wakes the screen in a dark
  * room. A missing device is logged and skipped, never fatal. The BME280
  * temp/RH is fed to the SGP30 as absolute humidity for its on-chip
- * compensation, and its IAQ baseline is saved to flash (baseline.c). Wi-Fi
+ * compensation, and its IAQ baseline is saved to flash (baseline.c); the
+ * BME280 pressure is fed to the SCD-43 likewise. Wi-Fi
  * connects to the network stored on the device (wifi.c), and the clock is
  * set from SNTP once it does (timesync.c). Hourly averages go to
  * a long-term log in flash (ltlog.c), and a LAN web dashboard serves it all
@@ -31,6 +33,8 @@
 #include <zephyr/drivers/fuel_gauge.h>
 #include <zephyr/input/input.h>
 #include <zephyr/logging/log.h>
+
+#include <zephyr/drivers/sensor/scd4x.h>
 
 #include <sensor_box/sgp30.h>
 
@@ -58,6 +62,7 @@ static const struct device *const bme280 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(bm
 static const struct device *const max17048 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(max17048));
 static const struct device *const pmsa003i = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(pmsa003i));
 static const struct device *const sgp30 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(sgp30));
+static const struct device *const scd4x = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(scd4x));
 
 /*
  * Absolute humidity in g/m^3 from temperature (degC) and relative humidity (%),
@@ -97,6 +102,33 @@ static void feed_sgp30_humidity(double ah_g_m3)
 			(enum sensor_attribute)SENSOR_ATTR_SGP30_ABS_HUMIDITY, &ah);
 }
 
+/*
+ * Push station pressure to the SCD-4x: its CO2 reading depends on air
+ * density (about 1.4 % per 10 hPa). Only sent when the whole-hPa value
+ * changes.
+ */
+static void feed_scd4x_pressure(double press_hpa)
+{
+	static int32_t sent;
+
+	if (scd4x == NULL || !device_is_ready(scd4x)) {
+		return;
+	}
+
+	int32_t hpa = (int32_t)lround(press_hpa);
+
+	if (hpa == sent || hpa < 700 || hpa > 1200) {
+		return;
+	}
+
+	struct sensor_value v = { .val1 = hpa };
+
+	if (sensor_attr_set(scd4x, SENSOR_CHAN_ALL,
+			    (enum sensor_attribute)SENSOR_ATTR_SCD4X_AMBIENT_PRESSURE, &v) == 0) {
+		sent = hpa;
+	}
+}
+
 static void report_bme280(struct readings *r)
 {
 	if (bme280 == NULL || !device_is_ready(bme280)) {
@@ -134,6 +166,7 @@ static void report_bme280(struct readings *r)
 	r->press_sl_hpa = press_sl_hpa;
 
 	feed_sgp30_humidity(ah_g_m3);
+	feed_scd4x_pressure(press_hpa);
 }
 
 static void report_tsl2591(struct readings *r)
@@ -237,8 +270,35 @@ static void report_sgp30(struct readings *r)
 	LOG_INF("sgp30:   eCO2 %d ppm  TVOC %d ppb", eco2.val1, tvoc.val1);
 
 	r->gas_ok = true;
-	r->eco2_ppm = eco2.val1;
 	r->tvoc_ppb = tvoc.val1;
+}
+
+static void report_scd4x(struct readings *r)
+{
+	if (scd4x == NULL || !device_is_ready(scd4x)) {
+		return;		/* not fitted: quietly, as it may well not be */
+	}
+	r->co2_present = true;
+
+	/* Reads the newest measurement; without a new one it keeps the last. */
+	if (sensor_sample_fetch(scd4x) != 0) {
+		LOG_WRN("scd4x: sample fetch failed");
+		return;
+	}
+
+	struct sensor_value co2;
+
+	sensor_channel_get(scd4x, SENSOR_CHAN_CO2, &co2);
+	if (co2.val1 == 0) {
+		/* Nothing measured yet (the first takes 5 s). */
+		LOG_INF("scd4x: warming up");
+		r->co2_warming = true;
+		return;
+	}
+
+	LOG_INF("scd4x:   CO2 %d ppm", co2.val1);
+	r->co2_ok = true;
+	r->co2_ppm = co2.val1;
 }
 
 /*
@@ -297,6 +357,7 @@ int main(void)
 			report_tsl2591(&r);
 			report_pmsa003i(&r);
 			report_sgp30(&r);
+			report_scd4x(&r);
 			report_max17048(&r);
 			r.wifi_ok = wifi_is_connected();
 

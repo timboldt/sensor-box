@@ -148,8 +148,8 @@ static int now_handler(struct http_client_ctx *client, enum http_transaction_sta
 	jnum(&j, r.pm_ok, r.pm2_5, 0);
 	jprintf(&j, ",\"pm10\":");
 	jnum(&j, r.pm_ok, r.pm10, 0);
-	jprintf(&j, ",\"eco2\":");
-	jnum(&j, r.gas_ok, r.eco2_ppm, 0);
+	jprintf(&j, ",\"co2\":");
+	jnum(&j, r.co2_ok, r.co2_ppm, 0);
 	jprintf(&j, ",\"tvoc\":");
 	jnum(&j, r.gas_ok, r.tvoc_ppb, 0);
 	jprintf(&j, ",\"lux\":");
@@ -158,8 +158,10 @@ static int now_handler(struct http_client_ctx *client, enum http_transaction_sta
 	jnum(&j, r.batt_ok, r.batt_v, 3);
 	jprintf(&j, ",\"batt_pct\":");
 	jnum(&j, r.batt_ok, MIN(r.batt_pct, 100), 0);
-	jprintf(&j, ",\"pm_warming\":%s,\"gas_warming\":%s}", r.pm_warming ? "true" : "false",
-		r.gas_warming ? "true" : "false");
+	jprintf(&j, ",\"pm_warming\":%s,\"gas_warming\":%s,\"co2_warming\":%s"
+		    ",\"co2_present\":%s}",
+		r.pm_warming ? "true" : "false", r.gas_warming ? "true" : "false",
+		r.co2_warming ? "true" : "false", r.co2_present ? "true" : "false");
 
 	return respond_json(rsp, &j);
 }
@@ -178,7 +180,7 @@ static int recent_handler(struct http_client_ctx *client, enum http_transaction_
 		int decimals;		/* -1: 4 significant digits */
 	} series[] = {
 		{ "temp", H_TEMP, 2 }, { "ah", H_AH, 2 },     { "press", H_PRESS, 1 },
-		{ "pm25", H_PM25, 1 }, { "eco2", H_ECO2, 0 }, { "tvoc", H_TVOC, 0 },
+		{ "pm25", H_PM25, 1 }, { "co2", H_CO2, 0 } , { "tvoc", H_TVOC, 0 },
 		{ "lux", H_LUX, -1 },
 	};
 	static char buf[RECENT_POINTS_PER_CHUNK * 12 + 256];
@@ -296,7 +298,7 @@ static void history_row(struct jbuf *j, const struct ltlog_record *r)
 	jprintf(j, ",");
 	jnum(j, r->valid & LTLOG_PM25, r->pm25, 0);
 	jprintf(j, ",");
-	jnum(j, r->valid & LTLOG_ECO2, r->eco2, 0);
+	jnum(j, r->valid & LTLOG_CO2, r->co2, 0);
 	jprintf(j, ",");
 	jnum(j, r->valid & LTLOG_TVOC, r->tvoc, 0);
 	jprintf(j, ",");
@@ -307,7 +309,7 @@ static void history_row(struct jbuf *j, const struct ltlog_record *r)
 	jprintf(j, ",");
 	jnum(j, peaks && (r->valid & LTLOG_PM25), r->pm25_max, 0);
 	jprintf(j, ",");
-	jnum(j, peaks && (r->valid & LTLOG_ECO2), r->eco2_max, 0);
+	jnum(j, peaks && (r->valid & LTLOG_CO2), r->co2_max, 0);
 	jprintf(j, ",");
 	jnum(j, peaks && (r->valid & LTLOG_TVOC), r->tvoc_max, 0);
 	jprintf(j, "]");
@@ -348,7 +350,7 @@ static int history_handler(struct http_client_ctx *client, enum http_transaction
 		rsp->headers = json_headers;
 		rsp->header_count = ARRAY_SIZE(json_headers);
 		jprintf(&j, "{\"period\":3600,\"fields\":[\"t\",\"temp\",\"rh\",\"press\","
-			    "\"pm25\",\"eco2\",\"tvoc\",\"lux\",\"pm25_max\",\"eco2_max\","
+			    "\"pm25\",\"co2\",\"tvoc\",\"lux\",\"pm25_max\",\"co2_max\","
 			    "\"tvoc_max\"],\"rows\":[");
 	}
 

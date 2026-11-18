@@ -94,8 +94,10 @@ const METRICS = [
     conv: v => US ? v / 33.8639 : v, dec: () => US ? 2 : 0, span: () => US ? 0.05 : 2 },
   { key: "pm25",  name: "PM2.5", unit: () => "µg/m³", conv: v => v, dec: 0, span: () => 10,
     bands: [9, 35, 55], warm: "pm_warming", peak: "pm25_max", min0: true, capSpikes: true },
-  { key: "eco2",  name: "eCO2", unit: () => "ppm", conv: v => v, dec: 0, span: () => 200,
-    bands: [800, 1200, 2000], warm: "gas_warming", peak: "eco2_max", min0: true, capSpikes: true },
+  // True CO2 (SCD-43). Hourly records from before it was fitted have none.
+  { key: "co2",   name: "CO2", unit: () => "ppm", conv: v => v, dec: 0, span: () => 200,
+    bands: [800, 1200, 2000], warm: "co2_warming", peak: "co2_max", min0: true, capSpikes: true,
+    note: d => d.co2_present === false ? "no sensor" : "" },
   { key: "tvoc",  name: "TVOC", unit: () => "ppb", conv: v => v, dec: 0, span: () => 50,
     bands: [220, 660, 2200], warm: "gas_warming", peak: "tvoc_max", min0: true, capSpikes: true },
   // Light as decibels re 1 lux (0 dB = 1 lux, -30 dB = 0.001 lux).
@@ -190,7 +192,7 @@ function drawChart(container, m, pts, x0, x1, gap, peaks) {
   const ty = v => m.log ? Math.log10(Math.max(v, 0.1)) : v;
   let lo = Math.min(...vals.map(p => ty(p[1])));
   let hi = Math.max(...vals.concat(peakVals).map(p => ty(p[1])));
-  // Pollutants: a brief huge spike (the SGP30 tops out at 60000) would squash
+  // Pollutants: a brief huge spike (e.g. TVOC: the SGP30 tops out at 60000) would squash
   // everything else into a flat line. The axis follows the bulk of the main line
   // (its 90th percentile) with room for twice that range; anything higher is
   // pinned to the top edge and marked with a triangle.

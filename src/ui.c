@@ -13,7 +13,7 @@
  *   |     70.5     |     9.8      |    30.07     |  current value
  *   |  ___/‾‾\__   |  ‾‾\___/‾    |  ____/‾‾‾    |  trend, last 15 min
  *   +--------------+--------------+--------------+
- *   |    PM2.5     |     eCO2     |     TVOC     |  air-quality values
+ *   |    PM2.5     |     CO2      |     TVOC     |  air-quality values
  *   |       6      |     400      |       0      |  coloured by band
  *   |  _/\___/\_   |  __/‾‾\__    |  ___/\___    |
  *   +--------------+--------------+--------------+
@@ -32,7 +32,7 @@
  * On the dashboard units are left off to keep the tiles uncluttered:
  * temperature is in F or C (CONFIG_SENSOR_BOX_US_UNITS), humidity absolute
  * (g/m3: it follows the air's moisture, where %RH swings with temperature),
- * pressure sea-level (MSL) inHg or hPa, PM2.5 ug/m3, eCO2 ppm, TVOC ppb.
+ * pressure sea-level (MSL) inHg or hPa, PM2.5 ug/m3, CO2 ppm, TVOC ppb.
  * The chart pages show the unit.
  *
  * Each trend line auto-scales to its own data, with a minimum span so sensor
@@ -100,7 +100,7 @@ enum tile_id {
 	T_AH,
 	T_PRESS,
 	T_PM25,
-	T_ECO2,
+	T_CO2,
 	T_TVOC,
 	T_TILES,		/* the readings above have dashboard tiles */
 	T_LIGHT = T_TILES,	/* chart page only; lux is in the status bar */
@@ -124,7 +124,7 @@ static const struct {
 	[T_PRESS] = { "Pressure", "Pressure (sea level)", US ? "inHg" : "hPa",
 		      US ? 2 : 0, H_PRESS, US ? 0.05f : 2.0f },
 	[T_PM25] = { "PM2.5", "PM2.5", "ug/m3", 0, H_PM25, 10.0f, false, true },
-	[T_ECO2] = { "eCO2", "eCO2", "ppm", 0, H_ECO2, 200.0f, false, true },
+	[T_CO2] = { "CO2", "CO2", "ppm", 0, H_CO2, 200.0f, false, true },
 	[T_TVOC] = { "TVOC", "TVOC", "ppb", 0, H_TVOC, 50.0f, false, true },
 	[T_LIGHT] = { "Light", "Light", "dB", 0, H_LUX, 10.0f, false },
 };
@@ -196,12 +196,22 @@ static bool warming(enum tile_id id, const struct readings *r)
 	switch (id) {
 	case T_PM25:
 		return r->pm_warming;
-	case T_ECO2:
+	case T_CO2:
+		return r->co2_warming;
 	case T_TVOC:
 		return r->gas_warming;
 	default:
 		return false;
 	}
+}
+
+/* Why a reading has no value: shown where its trend line would be, or NULL. */
+static const char *status_note(enum tile_id id, const struct readings *r)
+{
+	if (id == T_CO2 && !r->co2_present) {
+		return "no sensor";
+	}
+	return warming(id, r) ? "warming up" : NULL;
 }
 
 /* Current value of a tile, in display units. False if not available. */
@@ -220,9 +230,9 @@ static bool current_value(enum tile_id id, const struct readings *r, float *v)
 	case T_PM25:
 		*v = (float)r->pm2_5;
 		return r->pm_ok;
-	case T_ECO2:
-		*v = (float)r->eco2_ppm;
-		return r->gas_ok;
+	case T_CO2:
+		*v = (float)r->co2_ppm;
+		return r->co2_ok;
 	case T_TVOC:
 		*v = (float)r->tvoc_ppb;
 		return r->gas_ok;
@@ -238,18 +248,18 @@ static bool current_value(enum tile_id id, const struct readings *r, float *v)
  * Air-quality bands -> colour; plain text colour for the climate readings.
  * Upper bounds of good / fair / poor; anything above the last is bad.
  *   PM2.5: US EPA AQI breakpoints (2024).
- *   eCO2:  common indoor ventilation guidance.
+ *   CO2:   common indoor ventilation guidance.
  *   TVOC:  German UBA indoor-air levels, in ppb.
  */
 static lv_color_t value_colour(enum tile_id id, float v)
 {
 	static const float bands[T_COUNT][3] = {
 		[T_PM25] = { 9, 35, 55 },
-		[T_ECO2] = { 800, 1200, 2000 },
+		[T_CO2] = { 800, 1200, 2000 },
 		[T_TVOC] = { 220, 660, 2200 },
 	};
 
-	if (id != T_PM25 && id != T_ECO2 && id != T_TVOC) {
+	if (id != T_PM25 && id != T_CO2 && id != T_TVOC) {
 		return COL_TEXT;
 	}
 	if (v <= bands[id][0]) {
@@ -594,7 +604,8 @@ static void render_chart_page(void)
 		lv_label_set_text_static(detail.y_mid, "");
 		lv_label_set_text_static(detail.y_min, "");
 		lv_label_set_text_static(detail.note,
-					 have_last && warming(id, &last) ? "warming up" : "no data yet");
+					 have_last && status_note(id, &last) ? status_note(id, &last)
+								       : "no data yet");
 	}
 	lv_obj_align_to(detail.note, detail.chart, LV_ALIGN_CENTER, 0, 0);
 }
@@ -671,8 +682,10 @@ void ui_update(const struct readings *r)
 
 	for (int i = 0; i < T_TILES; i++) {
 		update_tile(i, r);
-		/* During a sensor's warm-up, say so where the trend line will be. */
-		lv_label_set_text_static(tiles[i].note, warming(i, r) ? "warming up" : "");
+		/* During a sensor's warm-up (or without one), say so where the trend line goes. */
+		const char *note = status_note(i, r);
+
+		lv_label_set_text_static(tiles[i].note, note ? note : "");
 	}
 
 	if (page != 0) {
