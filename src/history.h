@@ -19,6 +19,7 @@
 #define SENSOR_BOX_HISTORY_H_
 
 #include <stdint.h>
+#include <time.h>
 
 #include "readings.h"
 
@@ -69,6 +70,20 @@ int history_get(enum history_window w, enum history_series s, float *out, int ma
  * series; ones no longer (or not yet) kept come back as NAN.
  */
 uint32_t history_snapshot(enum history_window w, int64_t *age_ms);
+
+/*
+ * Restore one past minute from a saved log: v[] is each series' value for
+ * the UTC minute starting at `minute` (NAN = none), `now` the current UTC
+ * time. Only fills buckets from before this boot (they otherwise hold the
+ * boot-time backfill); anything measured since boot is left alone.
+ */
+void history_restore(time_t minute, const float v[H_COUNT], time_t now);
+
+/*
+ * Seconds of real data in a window, back from now: the uptime, or more
+ * if older data was restored.
+ */
+int64_t history_covered_s(enum history_window w);
 void history_get_seq(enum history_window w, enum history_series s, uint32_t first, int count,
 		     float *out);
 

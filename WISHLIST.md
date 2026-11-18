@@ -20,11 +20,10 @@ here is promised; it's a place to keep them.
     rail with the PMSA003I fan and Wi-Fi bursts.
 
 - **SD card logging, next steps** (minute CSV files are written to
-  `/SD:/LOG/`): at boot, once the clock is set, reload the last 24 hours
-  from the files into the RAM history so the charts survive reboots and
-  reflashes. Then the web page: choose arbitrary intervals at sensible
-  detail (1-minute from the files for recent days, coarser further back,
-  "All" downsampled rather than everything); download a day's CSV.
+  `/SD:/LOG/`, and the last 24 hours reload at boot): the web page should
+  offer arbitrary intervals at sensible detail (1-minute from the files
+  for recent days, coarser further back, "All" downsampled rather than
+  everything), and a way to download a day's CSV.
 
 ## New hardware on hand
 

@@ -86,6 +86,8 @@ struct window {
 	int64_t start_ms;
 	/* Whether each series has had its first valid reading (and been backfilled). */
 	bool seeded[H_COUNT];
+	/* Uptime (ms, <= 0) of the oldest restored data; 0 if none. */
+	int64_t oldest_ms;
 };
 
 static uint16_t long_buckets[HISTORY_LEN][H_COUNT];
@@ -223,6 +225,58 @@ int history_get(enum history_window wi, enum history_series s, float *out, int m
 	}
 	k_mutex_unlock(&lock);
 	return k;
+}
+
+/* Restore the value of the bucket containing uptime t_ms, if it's before boot. */
+static void restore_at(struct window *w, int64_t t_ms, const float *v)
+{
+	if (!w->open || t_ms >= 0 || t_ms >= w->start_ms) {
+		return;
+	}
+
+	/* Completed bucket seq - 1 covers [start - period, start). */
+	int64_t back = (w->start_ms - t_ms - 1) / w->period_ms;
+
+	if (back >= w->len) {
+		return;		/* older than the window */
+	}
+
+	uint16_t *b = w->buckets[(w->seq - 1 - back) % w->len];
+
+	for (int s = 0; s < H_COUNT; s++) {
+		if (!isnan(v[s])) {
+			b[s] = encode(s, v[s]);
+		}
+	}
+	w->oldest_ms = MIN(w->oldest_ms, t_ms);
+}
+
+void history_restore(time_t minute, const float v[H_COUNT], time_t now)
+{
+	k_mutex_lock(&lock, K_FOREVER);
+	int64_t up = k_uptime_get();
+	/* Uptime at the start of that minute (negative: before boot). */
+	int64_t t0 = up - (int64_t)(now - minute) * 1000;
+
+	for (size_t i = 0; i < ARRAY_SIZE(windows); i++) {
+		struct window *w = &windows[i];
+
+		/* Every bucket whose middle falls within the minute. */
+		for (int64_t t = t0 + w->period_ms / 2; t < t0 + 60000; t += w->period_ms) {
+			restore_at(w, t, v);
+		}
+	}
+	k_mutex_unlock(&lock);
+}
+
+int64_t history_covered_s(enum history_window wi)
+{
+	k_mutex_lock(&lock, K_FOREVER);
+	int64_t up = k_uptime_get();
+	int64_t covered = up - windows[wi].oldest_ms;
+
+	k_mutex_unlock(&lock);
+	return covered / 1000;
 }
 
 uint32_t history_snapshot(enum history_window wi, int64_t *age_ms)

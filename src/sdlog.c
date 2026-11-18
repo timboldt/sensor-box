@@ -17,13 +17,19 @@
  * wrong number of fields. Nothing is written while the battery is nearly
  * flat and not charging, so a dying battery can't cut power mid-write.
  *
+ * Once the clock is set after boot, the last 24 hours are read back from
+ * the files into the RAM history (history_restore), so the charts survive
+ * a reboot or reflash. Columns are found by name in each file's header.
+ *
  * Nothing is logged before the clock is set (no RTC), as with ltlog.c.
  * Without a card the lines are dropped. "sdlog" on the console shows the
  * state; "sdlog flush" writes out the buffer now ("sdcard unmount" does
  * too).
  */
 
+#include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -32,6 +38,7 @@
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/util.h>
 
+#include "history.h"
 #include "sdcard.h"
 #include "sdlog.h"
 #include "timesync.h"
@@ -222,6 +229,8 @@ static void emit_minute(void)
 	}
 }
 
+static void restore_history(void);
+
 static void add(enum col c, bool ok, double v)
 {
 	if (ok) {
@@ -233,8 +242,17 @@ static void add(enum col c, bool ok, double v)
 
 void sdlog_add(const struct readings *r)
 {
+	static bool restored;
+
 	if (!timesync_valid()) {
 		return;
+	}
+	if (!restored) {
+		/* Once, as soon as the clock is set (it's needed to place the data). */
+		restored = true;
+		if (sdcard_ready()) {
+			restore_history();
+		}
 	}
 
 	time_t now = timesync_now();
@@ -276,6 +294,144 @@ void sdlog_add(const struct readings *r)
 	add(C_BATT_MA, r->batt_i_ok, r->batt_ma);
 
 	k_mutex_unlock(&lock);
+}
+
+/* ---- restoring the RAM history at boot ---- */
+
+/* The CSV column each history series is restored from. */
+static const char *const series_col[H_COUNT] = {
+	[H_TEMP] = "temp_c",
+	[H_AH] = "ah_g_m3",
+	[H_PRESS] = "press_hpa",
+	[H_PM25] = "pm25",
+	[H_CO2] = "co2_ppm",
+	[H_TVOC] = "tvoc_ppb",
+	[H_PC03] = "pc03_per_l",
+	[H_LUX] = "lux",
+	[H_BATT_I] = "batt_ma",
+};
+
+#define MAX_FIELDS 48
+
+struct restore_ctx {
+	time_t from;		/* restore minutes in [from, now - 60] */
+	time_t now;
+	char line[512];
+	size_t len;
+	bool overlong;		/* the current line didn't fit: skip it */
+	int nfields;		/* from the header; 0 = header not seen yet */
+	int col[H_COUNT];	/* field index of each series, -1 if absent */
+	int restored;
+};
+
+static void restore_line(struct restore_ctx *c)
+{
+	char *field[MAX_FIELDS];
+	int n = 0;
+	char *p = c->line;
+
+	while (n < MAX_FIELDS) {
+		field[n++] = p;
+		p = strchr(p, ',');
+		if (p == NULL) {
+			break;
+		}
+		*p++ = '\0';
+	}
+
+	if (c->nfields == 0) {
+		/* The header: find each series' column. */
+		for (int s = 0; s < H_COUNT; s++) {
+			c->col[s] = -1;
+			for (int i = 0; i < n; i++) {
+				if (series_col[s] != NULL && strcmp(field[i], series_col[s]) == 0) {
+					c->col[s] = i;
+				}
+			}
+		}
+		c->nfields = n;
+		return;
+	}
+	if (n != c->nfields) {
+		return;		/* torn or damaged line */
+	}
+
+	int y, mo, d, h, mi;
+
+	if (sscanf(field[0], "%4d-%2d-%2dT%2d:%2d", &y, &mo, &d, &h, &mi) != 5) {
+		return;
+	}
+
+	time_t t = (time_t)(days_from_civil(y, mo, d) * 86400 + h * 3600 + mi * 60);
+
+	if (t < c->from || t > c->now - 60) {
+		return;
+	}
+
+	float v[H_COUNT];
+
+	for (int s = 0; s < H_COUNT; s++) {
+		const char *f = c->col[s] >= 0 ? field[c->col[s]] : "";
+
+		v[s] = *f != '\0' ? strtof(f, NULL) : NAN;
+	}
+	history_restore(t, v, c->now);
+	c->restored++;
+}
+
+static bool restore_chunk(const char *data, size_t len, void *arg)
+{
+	struct restore_ctx *c = arg;
+
+	for (size_t i = 0; i < len; i++) {
+		char ch = data[i];
+
+		if (ch == '\n') {
+			if (!c->overlong) {
+				c->line[c->len] = '\0';
+				restore_line(c);
+			}
+			c->len = 0;
+			c->overlong = false;
+		} else if (ch != '\r') {
+			if (c->len < sizeof(c->line) - 1) {
+				c->line[c->len++] = ch;
+			} else {
+				c->overlong = true;
+			}
+		}
+	}
+	return true;
+}
+
+/* Read the last 24 hours back into the RAM history. */
+static void restore_history(void)
+{
+	static struct restore_ctx c;	/* too big for the stack */
+	time_t now = timesync_now();
+	int64_t start = k_uptime_get();
+
+	memset(&c, 0, sizeof(c));
+	c.now = now;
+	c.from = now - 86400;
+
+	/* Yesterday's file, then today's (UTC). */
+	for (time_t day = c.from - c.from % 86400; day <= now; day += 86400) {
+		struct tm tm;
+		char path[48];
+
+		gmtime_r(&day, &tm);
+		snprintf(path, sizeof(path), LOG_DIR "/%04d%02d%02d.CSV", tm.tm_year + 1900,
+			 tm.tm_mon + 1, tm.tm_mday);
+		c.len = 0;
+		c.overlong = false;
+		c.nfields = 0;
+		(void)sdcard_read(path, restore_chunk, &c);
+	}
+	if (c.restored > 0) {
+		LOG_INF("restored %d minute(s) of history from the card in %lld ms",
+			c.restored, k_uptime_get() - start);
+	}
 }
 
 /* ---- console ---- */

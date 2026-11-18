@@ -48,7 +48,9 @@ local network.
   `LOG/YYYYMMDD.CSV`: the time (start of the minute, UTC), each reading's
   average over the minute and the pollutants' peaks; empty = no reading.
   Lines are written every 5 minutes, so a crash or reboot loses at most
-  the last few; logging pauses while the battery is nearly flat. `sdlog`
+  the last few; logging pauses while the battery is nearly flat. At boot,
+  once the clock is set, the last 24 hours are read back from the files,
+  so the charts (screen and web) carry on across reboots and reflashes. `sdlog`
   shows the state, `sdlog flush` writes now (`sdcard unmount` does too:
   use it before pulling the card while running). Insert or swap cards with the
   box **fully off** (USB and battery unplugged): a card that first sees

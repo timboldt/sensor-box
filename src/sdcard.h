@@ -28,6 +28,14 @@ bool sdcard_ready(void);
 int sdcard_append(const char *dir, const char *path, const char *header, const char *data,
 		  size_t len);
 
+/*
+ * Read the file `path` from the start, passing each piece to cb (which
+ * returns false to stop). Returns 0, or a negative error (-ENOENT: no
+ * such file; -ENODEV: no card).
+ */
+int sdcard_read(const char *path, bool (*cb)(const char *data, size_t len, void *arg),
+		void *arg);
+
 /* Called (once) before "sdcard unmount", e.g. to write out buffered data. */
 void sdcard_set_unmount_hook(void (*hook)(void));
 

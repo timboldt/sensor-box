@@ -127,7 +127,7 @@ time_t timesync_now(void)
 }
 
 /* Days since 1970-01-01 for a proleptic Gregorian date (H. Hinnant's algorithm). */
-static int64_t days_from_civil(int64_t y, int m, int d)
+int64_t days_from_civil(int64_t y, int m, int d)
 {
 	y -= m <= 2;
 	int64_t era = (y >= 0 ? y : y - 399) / 400;

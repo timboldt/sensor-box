@@ -149,6 +149,46 @@ bool sdcard_ready(void)
 	return mounted;
 }
 
+int sdcard_read(const char *path, bool (*cb)(const char *data, size_t len, void *arg),
+		void *arg)
+{
+	static char chunk[512];	/* under `lock` */
+	struct fs_file_t f;
+	int ret;
+
+	k_mutex_lock(&lock, K_FOREVER);
+	if (!mounted) {
+		k_mutex_unlock(&lock);
+		return -ENODEV;
+	}
+
+	/* Check first: Zephyr logs an error for opening a missing file. */
+	struct fs_dirent st;
+
+	ret = fs_stat(path, &st);
+	if (ret != 0) {
+		k_mutex_unlock(&lock);
+		return ret;
+	}
+	fs_file_t_init(&f);
+	ret = fs_open(&f, path, FS_O_READ);
+	if (ret == 0) {
+		ssize_t n;
+
+		while ((n = fs_read(&f, chunk, sizeof(chunk))) > 0) {
+			if (!cb(chunk, n, arg)) {
+				break;
+			}
+		}
+		if (n < 0) {
+			ret = (int)n;
+		}
+		fs_close(&f);
+	}
+	k_mutex_unlock(&lock);
+	return ret;
+}
+
 void sdcard_set_unmount_hook(void (*hook)(void))
 {
 	unmount_hook = hook;

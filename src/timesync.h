@@ -8,6 +8,7 @@
 #define SENSOR_BOX_TIMESYNC_H_
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <time.h>
 
 /* Sync the clock whenever the network comes up, and periodically after. */
@@ -24,5 +25,8 @@ time_t timesync_now(void);
  * saving if CONFIG_SENSOR_BOX_US_DST). False if the clock isn't set yet.
  */
 bool timesync_local(struct tm *tm);
+
+/* Days since 1970-01-01 (UTC) of a calendar date, e.g. for parsing times. */
+int64_t days_from_civil(int64_t y, int m, int d);
 
 #endif /* SENSOR_BOX_TIMESYNC_H_ */

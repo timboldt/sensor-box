@@ -327,13 +327,14 @@ function hourlyRows(d) {
   return [...byT.values()].sort((a, b) => a[0] - b[0]);
 }
 
-// Live (RAM) data. It only goes back to the last boot (before that it's a flat
-// placeholder), so the part of the window before boot comes from the hourly log.
+// Live (RAM) data. It only goes back d.covered seconds: to the last boot, or
+// further if the device restored it from its SD card (before that it's a flat
+// placeholder), so the part of the window before that comes from the hourly log.
 // The pollutants' peak line comes from the hourly log throughout (1-minute
 // averages smooth the peaks away), ending with the hour so far.
 function liveCharts(box, cfg, d, early) {
   const end = d.t || nowS();
-  const boot = end - d.uptime;
+  const boot = end - (d.covered ?? d.uptime);
   // The newest point is the last completed bucket, which ended d.age s ago;
   // each point is plotted at the middle of its bucket.
   const last = end - (d.age || 0) - d.period / 2;

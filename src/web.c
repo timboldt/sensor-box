@@ -8,9 +8,10 @@
  *   /api/recent[?window=short][&points=N]
  *                          the last N points of the 24-hour RAM history
  *                          (1-minute averages), or with window=short the
- *                          15-minute one (10 s); points from before "uptime"
- *                          seconds ago are the boot-time backfill, not
- *                          measurements
+ *                          15-minute one (10 s); points from before
+ *                          "covered" seconds ago (the uptime, or more if
+ *                          history was restored from the SD card at boot)
+ *                          are the boot-time backfill, not measurements
  *   /api/history?since=T   the long-term hourly log from flash, from UTC T on,
  *                          plus the hour so far ("current", or null)
  *
@@ -237,12 +238,13 @@ static int recent_handler(struct http_client_ctx *client, enum http_transaction_
 		rsp->header_count = ARRAY_SIZE(json_headers);
 		/*
 		 * Points are oldest first, "period" seconds apart; the last one
-		 * ended "age" seconds before "t". "uptime" lets the page tell real
-		 * points from the boot-time backfill.
+		 * ended "age" seconds before "t". "covered" lets the page tell
+		 * real points from the boot-time backfill.
 		 */
-		jprintf(&j, "{\"period\":%d,\"uptime\":%lld,\"age\":%lld,\"t\":",
+		jprintf(&j, "{\"period\":%d,\"uptime\":%lld,\"covered\":%lld,\"age\":%lld,"
+			    "\"t\":",
 			w == HW_SHORT ? HISTORY_SHORT_PERIOD_S : HISTORY_PERIOD_S,
-			k_uptime_get() / 1000, age_ms / 1000);
+			k_uptime_get() / 1000, history_covered_s(w), age_ms / 1000);
 		jnum(&j, timesync_valid(), (double)timesync_now(), 0);
 	}
 
