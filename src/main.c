@@ -12,7 +12,7 @@
  *   - SCD-43   true CO2                     (sensor API, Zephyr's scd4x)
  *   - MAX17048 battery voltage / charge     (fuel-gauge API)
  * and shows them on the TFT (ui.c), switching its backlight off when the room
- * is dark (backlight.c), plus the 1 Hz heartbeat + LED blink. The Boot
+ * is dark (backlight.c). The red LED is kept off. The Boot
  * button pages through full-screen charts, and wakes the screen in a dark
  * room. A missing device is logged and skipped, never fatal. The BME280
  * temp/RH is fed to the SGP30 as absolute humidity for its on-chip
@@ -54,7 +54,7 @@ LOG_MODULE_REGISTER(sensor_box, LOG_LEVEL_INF);
 /* How many 1 Hz ticks between full readings / report lines. */
 #define REPORT_EVERY_TICKS 5U
 
-/* led0 -> &red_led (gpio0 15, active high) from the board devicetree. */
+/* led0 -> &red_led (gpio0 15, active high): held off; no heartbeat blink. */
 static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
 
 /* I2C devices from app.overlay; *_OR_NULL keeps the build fine if removed. */
@@ -347,8 +347,6 @@ int main(void)
 	uint32_t tick = 0;
 
 	while (1) {
-		gpio_pin_toggle_dt(&led);
-
 		if (tick % REPORT_EVERY_TICKS == 0) {
 			struct readings r = { 0 };
 
