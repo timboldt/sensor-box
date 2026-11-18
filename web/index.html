@@ -67,14 +67,15 @@
 
   <h2>Trends
     <span class="seg" id="ranges">
-      <button data-range="15m">15 min</button><button data-range="6h" class="on">6 h</button><button
-        data-range="1d">Day</button><button data-range="7d">Week</button><button
-        data-range="30d">Month</button><button data-range="all">All</button>
+      <button data-range="10m">10 min</button><button data-range="1h">1 h</button><button
+        data-range="4h" class="on">4 h</button><button data-range="1d">Day</button><button
+        data-range="7d">Week</button><button data-range="30d">Month</button><button
+        data-range="90d">3 Months</button>
     </span>
   </h2>
   <div class="charts" id="charts"></div>
 
-  <footer>The last 24 hours are kept in 1-minute detail (back to the device's last restart; earlier hours come from the hourly log). Hourly averages (and pollutant peaks, the fainter line) are kept for about 4 months. Times are in your browser's time zone.</footer>
+  <footer>The last 24 hours are kept in 1-minute detail (restored from the SD card after a restart; without a card, earlier hours come from the hourly log). Week and longer show hourly averages (3-hour for 3 Months), with pollutant peaks as the fainter line; they're kept for about 4 months. Times are in your browser's time zone.</footer>
 </main>
 
 <script>
@@ -291,15 +292,17 @@ const nowS = () => Date.now() / 1000;
 //   live:  the device's RAM history ("short" = 15 min of 10 s, "long" = 24 h of
 //          1 min; points = how many to fetch)
 //   days:  the hourly log in flash (0 = all of it)
+// Each range is roughly 4-7 times the one before.
 const RANGES = {
-  "15m": { live: "short", span: 900, refresh: 10 },
-  "6h":  { live: "long", span: 6 * 3600, points: 360, refresh: 60 },
+  "10m": { live: "short", span: 600, points: 60, refresh: 10 },
+  "1h":  { live: "long", span: 3600, points: 60, refresh: 60 },
+  "4h":  { live: "long", span: 4 * 3600, points: 240, refresh: 60 },
   "1d":  { live: "long", span: 86400, points: 1440, refresh: 60 },
   "7d":  { days: 7, refresh: 600 },
   "30d": { days: 30, refresh: 600 },
-  "all": { days: 0, refresh: 600 },
+  "90d": { days: 90, group: 3, refresh: 600 },   // hourly rows averaged in threes
 };
-let range = "6h";
+let range = "4h";
 let lastData = null;     // what renderCharts() last drew, for redraw on resize
 let lastFetch = 0;
 
@@ -365,18 +368,34 @@ function liveCharts(box, cfg, d, early) {
   }
 }
 
+// Hourly rows as [t (middle of its slot), average, peak] for one metric, with
+// `group` hours per slot (the average of the hours' averages, the highest peak).
+function hourlySeries(d, rows, m, group) {
+  const slot = 3600 * group;
+  const out = new Map();
+  for (const r of rows) {
+    const t0 = r[0] - r[0] % slot;
+    let s = out.get(t0);
+    if (!s) { s = { sum: 0, n: 0, peak: null }; out.set(t0, s); }
+    const v = rowValue(d, r, m.key);
+    if (v !== null) { s.sum += v; s.n++; }
+    const p = m.peak ? rowValue(d, r, m.peak) : null;
+    if (p !== null) s.peak = s.peak === null ? p : Math.max(s.peak, p);
+  }
+  return [...out.entries()].map(([t0, s]) =>
+    [t0 + slot / 2, s.n ? m.conv(s.sum / s.n) : null, s.peak === null ? null : m.conv(s.peak)]);
+}
+
 function hourlyCharts(box, cfg, d) {
   const rows = hourlyRows(d);
   const end = nowS();
-  const start = cfg.days ? end - cfg.days * 86400 : (rows.length ? rows[0][0] : end - 86400);
+  const start = end - cfg.days * 86400;
+  const group = cfg.group || 1;
   for (const m of METRICS) {
-    const pts = rows.map(r => { const v = rowValue(d, r, m.key);
-                                return [r[0] + 1800, v === null ? null : m.conv(v)]; });
-    // The hour's peak, for the pollutants (null for hours before peaks were kept).
-    const pcol = m.peak ? d.fields.indexOf(m.peak) : -1;
-    const peaks = pcol < 0 ? null
-      : rows.map(r => [r[0] + 1800, r[pcol] === null || r[pcol] === undefined ? null : m.conv(r[pcol])]);
-    drawChart(box, m, pts, start, end, d.period * 1.5, peaks);
+    const s = hourlySeries(d, rows, m, group);
+    // The peak line, for the pollutants (null for hours before peaks were kept).
+    const peaks = m.peak ? s.map(p => [p[0], p[2]]) : null;
+    drawChart(box, m, s.map(p => [p[0], p[1]]), start, end, d.period * group * 1.5, peaks);
   }
 }
 
@@ -429,13 +448,13 @@ async function pollCharts() {
     let data;
     if (cfg.live) {
       const live = await getJSON("/api/recent" +
-        (cfg.live === "short" ? "?window=short" : "?points=" + cfg.points));
+        "?points=" + cfg.points + (cfg.live === "short" ? "&window=short" : ""));
       // Hourly data, for the peaks and to cover the time before the last boot.
       const early = cfg.live === "long"
         ? await getJSON("/api/history?since=" + Math.floor(nowS() - cfg.span - 3600)) : null;
       data = { range: want, live, early };
     } else {
-      const since = cfg.days ? Math.floor(nowS() - cfg.days * 86400) : 0;
+      const since = Math.floor(nowS() - cfg.days * 86400);
       data = { range: want, hourly: await getJSON("/api/history?since=" + since) };
     }
     if (want !== range) return;      // the user switched while this was loading

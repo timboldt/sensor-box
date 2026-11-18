@@ -114,8 +114,8 @@ No RTC: wall-clock time, when needed, will come from SNTP over Wi-Fi.
 
 Once on Wi-Fi, open **http://sensor-box.local** (or the IP address the box
 logs at boot) on any device on the same network. It shows the current
-readings and trend charts for the last 15 minutes, 6 hours, day, week,
-month or all history, in your browser's time zone. There is no login: anyone
+readings and trend charts for the last 10 minutes, hour, 4 hours, day,
+week, month or 3 months, in your browser's time zone. There is no login: anyone
 on the network can view it, and nothing can be changed from it.
 
 The page is `web/index.html`, built into the firmware. The JSON behind it
@@ -124,8 +124,8 @@ can also be used directly (values are metric; missing values are `null`):
 | Endpoint | Contents |
 |----------|----------|
 | `/api/now` | Current readings |
-| `/api/recent` | Last 24 hours, 1-minute averages, oldest first (`?points=N` for the last N; `?window=short`: last 15 minutes, 10 s); includes `uptime`, since points before the last boot are a placeholder, and `age`, how long ago the newest point ended |
-| `/api/history?since=<unix time>` | Hourly averages from flash |
+| `/api/recent` | Last 24 hours, 1-minute averages, oldest first (`?points=N` for the last N; `?window=short`: last 15 minutes, 10 s); includes `covered`, how many seconds back the real data goes (the uptime, or more if restored from the SD card; older points are a placeholder), and `age`, how long ago the newest point ended |
+| `/api/history?since=<unix time>` | Hourly averages and peaks from flash, plus the hour so far (`current`) |
 
 ## Wi-Fi
 
