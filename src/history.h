@@ -43,6 +43,7 @@ enum history_series {
 	H_PM25,		/* ug/m3 */
 	H_CO2,		/* ppm (SCD-4x) */
 	H_TVOC,		/* ppb */
+	H_PC03,		/* particles >0.3 um per litre */
 	H_LUX,		/* lux */
 	H_COUNT,
 };

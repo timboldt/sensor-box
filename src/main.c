@@ -7,7 +7,7 @@
  * Reads every sensor on the box each REPORT_EVERY_TICKS:
  *   - BME280   temp / humidity / pressure   (sensor API)
  *   - TSL2591  ambient light / IR           (sensor API)
- *   - PMSA003I PM1.0 / 2.5 / 10             (sensor API, out-of-tree)
+ *   - PMSA003I PM1.0 / 2.5 / 10, >0.3 um count (sensor API, out-of-tree)
  *   - SGP30    TVOC (and eCO2, logged only) (sensor API, out-of-tree)
  *   - SCD-43   true CO2                     (sensor API, Zephyr's scd4x)
  *   - MAX17048 battery voltage / charge     (fuel-gauge API)
@@ -228,19 +228,22 @@ static void report_pmsa003i(struct readings *r)
 		return;
 	}
 
-	struct sensor_value pm1, pm25, pm10;
+	struct sensor_value pm1, pm25, pm10, pc03;
 
 	sensor_channel_get(pmsa003i, SENSOR_CHAN_PM_1_0, &pm1);
 	sensor_channel_get(pmsa003i, SENSOR_CHAN_PM_2_5, &pm25);
 	sensor_channel_get(pmsa003i, SENSOR_CHAN_PM_10, &pm10);
+	/* Counted per 0.1 L. */
+	sensor_channel_get(pmsa003i, SENSOR_CHAN_PM_0_3_COUNT, &pc03);
 
-	LOG_INF("pmsa003i: PM1.0 %d  PM2.5 %d  PM10 %d  ug/m3",
-		pm1.val1, pm25.val1, pm10.val1);
+	LOG_INF("pmsa003i: PM1.0 %d  PM2.5 %d  PM10 %d  ug/m3  >0.3um %d /L",
+		pm1.val1, pm25.val1, pm10.val1, pc03.val1 * 10);
 
 	r->pm_ok = true;
 	r->pm1_0 = pm1.val1;
 	r->pm2_5 = pm25.val1;
 	r->pm10 = pm10.val1;
+	r->pc03_per_l = pc03.val1 * 10;
 }
 
 static void report_sgp30(struct readings *r)

@@ -148,6 +148,8 @@ static int now_handler(struct http_client_ctx *client, enum http_transaction_sta
 	jnum(&j, r.pm_ok, r.pm2_5, 0);
 	jprintf(&j, ",\"pm10\":");
 	jnum(&j, r.pm_ok, r.pm10, 0);
+	jprintf(&j, ",\"pc03\":");
+	jnum(&j, r.pm_ok, r.pc03_per_l, 0);
 	jprintf(&j, ",\"co2\":");
 	jnum(&j, r.co2_ok, r.co2_ppm, 0);
 	jprintf(&j, ",\"tvoc\":");
@@ -180,7 +182,7 @@ static int recent_handler(struct http_client_ctx *client, enum http_transaction_
 		int decimals;		/* -1: 4 significant digits */
 	} series[] = {
 		{ "temp", H_TEMP, 2 }, { "ah", H_AH, 2 },     { "press", H_PRESS, 1 },
-		{ "pm25", H_PM25, 1 }, { "co2", H_CO2, 0 } , { "tvoc", H_TVOC, 0 },
+		{ "pm25", H_PM25, 1 }, { "co2", H_CO2, 0 } , { "tvoc", H_TVOC, 0 }, { "pc03", H_PC03, 0 },
 		{ "lux", H_LUX, -1 },
 	};
 	static char buf[RECENT_POINTS_PER_CHUNK * 12 + 256];
@@ -312,6 +314,11 @@ static void history_row(struct jbuf *j, const struct ltlog_record *r)
 	jnum(j, peaks && (r->valid & LTLOG_CO2), r->co2_max, 0);
 	jprintf(j, ",");
 	jnum(j, peaks && (r->valid & LTLOG_TVOC), r->tvoc_max, 0);
+	/* Particle count, per litre (stored per 0.1 L); null before v5. */
+	jprintf(j, ",");
+	jnum(j, r->valid & LTLOG_PC03, r->pc03 * 10.0, 0);
+	jprintf(j, ",");
+	jnum(j, r->valid & LTLOG_PC03, r->pc03_max * 10.0, 0);
 	jprintf(j, "]");
 }
 
@@ -321,7 +328,7 @@ static int history_handler(struct http_client_ctx *client, enum http_transaction
 			   const struct http_request_ctx *req, struct http_response_ctx *rsp,
 			   void *user_data)
 {
-	static char buf[(HIST_ROWS_PER_CHUNK + 1) * 120 + 200];
+	static char buf[(HIST_ROWS_PER_CHUNK + 1) * 140 + 200];
 	static struct ltlog_cursor cur;
 	static uint32_t since;
 	static bool started;
@@ -351,7 +358,7 @@ static int history_handler(struct http_client_ctx *client, enum http_transaction
 		rsp->header_count = ARRAY_SIZE(json_headers);
 		jprintf(&j, "{\"period\":3600,\"fields\":[\"t\",\"temp\",\"rh\",\"press\","
 			    "\"pm25\",\"co2\",\"tvoc\",\"lux\",\"pm25_max\",\"co2_max\","
-			    "\"tvoc_max\"],\"rows\":[");
+			    "\"tvoc_max\",\"pc03\",\"pc03_max\"],\"rows\":[");
 	}
 
 	struct ltlog_record rec;

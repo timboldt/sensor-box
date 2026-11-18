@@ -74,7 +74,7 @@
   </h2>
   <div class="charts" id="charts"></div>
 
-  <footer>The last 24 hours are kept in 1-minute detail (back to the device's last restart; earlier hours come from the hourly log). Hourly averages (and pollutant peaks, the fainter line) are kept for about 4½ months. Times are in your browser's time zone.</footer>
+  <footer>The last 24 hours are kept in 1-minute detail (back to the device's last restart; earlier hours come from the hourly log). Hourly averages (and pollutant peaks, the fainter line) are kept for about 4 months. Times are in your browser's time zone.</footer>
 </main>
 
 <script>
@@ -93,20 +93,25 @@ const METRICS = [
   { key: "press", name: "Pressure (MSL)", unit: () => US ? "inHg" : "hPa",
     conv: v => US ? v / 33.8639 : v, dec: () => US ? 2 : 0, span: () => US ? 0.05 : 2 },
   { key: "pm25",  name: "PM2.5", unit: () => "µg/m³", conv: v => v, dec: 0, span: () => 10,
-    bands: [9, 35, 55], warm: "pm_warming", peak: "pm25_max", min0: true, capSpikes: true },
+    bands: [9, 35, 55], warm: "pm_warming", peak: "pm25_max", min0: true, capSpikes: true,
+    note: d => d.pm1 === null || d.pm1 === undefined ? "" : "PM1 " + d.pm1 + " · PM10 " + d.pm10 },
   // True CO2 (SCD-43). Hourly records from before it was fitted have none.
   { key: "co2",   name: "CO2", unit: () => "ppm", conv: v => v, dec: 0, span: () => 200,
     bands: [800, 1200, 2000], warm: "co2_warming", peak: "co2_max", min0: true, capSpikes: true,
     note: d => d.co2_present === false ? "no sensor" : "" },
   { key: "tvoc",  name: "TVOC", unit: () => "ppb", conv: v => v, dec: 0, span: () => 50,
     bands: [220, 660, 2200], warm: "gas_warming", peak: "tvoc_max", min0: true, capSpikes: true },
+  // Particles >0.3 µm per litre: far livelier than PM2.5 in clean indoor air
+  // (cooking, candles, dust). Log scale: it can jump a hundredfold.
+  { key: "pc03",  name: "Particles >0.3 µm", unit: () => "/L", conv: v => v, dec: 0, span: () => 1,
+    log: true, logFloor: 10, kilo: true, warm: "pm_warming", peak: "pc03_max" },
   // Light as decibels re 1 lux (0 dB = 1 lux, -30 dB = 0.001 lux).
   { key: "lux",   name: "Light", unit: () => "dB", conv: v => 10 * Math.log10(Math.max(v, 1e-5)),
     dec: v => Math.abs(v) < 10 ? 1 : 0, span: () => 10, luxNote: true },
 ];
 
 const decimals = (m, v) => typeof m.dec === "function" ? m.dec(v) : m.dec;
-const fmt = (m, v) => v.toFixed(decimals(m, v));
+const fmt = (m, v) => m.kilo && v >= 10000 ? (v / 1000).toFixed(0) + "k" : v.toFixed(decimals(m, v));
 const band = (m, v) => !m.bands ? "" :
   v <= m.bands[0] ? "good" : v <= m.bands[1] ? "fair" : v <= m.bands[2] ? "poor" : "bad";
 const el = (tag, cls, text) => {
@@ -189,7 +194,7 @@ function drawChart(container, m, pts, x0, x1, gap, peaks) {
     return;
   }
 
-  const ty = v => m.log ? Math.log10(Math.max(v, 0.1)) : v;
+  const ty = v => m.log ? Math.log10(Math.max(v, m.logFloor || 0.1)) : v;
   let lo = Math.min(...vals.map(p => ty(p[1])));
   let hi = Math.max(...vals.concat(peakVals).map(p => ty(p[1])));
   // Pollutants: a brief huge spike (e.g. TVOC: the SGP30 tops out at 60000) would squash

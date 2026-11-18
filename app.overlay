@@ -177,7 +177,7 @@
  * Split the 192 KB "storage" partition: the settings store (NVS: SGP30
  * baseline, Wi-Fi credentials) keeps the first 64 KB, of which it uses the
  * first 32 KB, so its data is untouched; the hourly long-term history
- * (src/ltlog.c) gets the remaining 128 KB, about 6 months of records.
+ * (src/ltlog.c) gets the remaining 128 KB, about 4.3 months of records.
  * Flashing the firmware touches neither.
  */
 &storage_partition {

@@ -16,10 +16,10 @@ local network.
 - The display shows a dashboard of current readings with 6-hour trends, and
   the local time once the clock has been set over the network.
 - **Boot button:** press to page through a full-screen chart for each
-  reading, plus light level (in dB, see below); after the last it returns
-  to the dashboard, and it also returns on its own after a minute. Don't
-  hold Boot while resetting or plugging in (that enters the ESP32-C6
-  download mode).
+  reading, plus the >0.3 µm particle count and light level (in dB, see
+  below); after the last it returns to the dashboard, and it also returns
+  on its own after a minute. Don't hold Boot while resetting or plugging in
+  (that enters the ESP32-C6 download mode).
 - **Warm-up:** PM2.5 shows "warming up" for the first 30 s after power-up
   (fan spin-up), TVOC for the SGP30's first ~15 s, and CO2 until the SCD-43's
   first measurement (~5 s).
@@ -36,8 +36,13 @@ local network.
   `sgp30 baseline [save|clear]` on the console shows, saves or clears it.
 - **Long-term history:** every reading is averaged per clock hour, and the
   peak PM2.5, CO2 and TVOC of each hour are kept too, in flash (128 KB,
-  about 4½ months, oldest dropped first), kept across reboots and reflashes.
+  about 4 months, oldest dropped first), kept across reboots and reflashes.
   `ltlog show [n]` lists the newest records (UTC), `ltlog clear` erases them.
+- **Particles:** besides PM2.5, the count of particles larger than 0.3 µm
+  per litre is charted (a chart page on the screen, a tile and chart on the
+  web page) on a log scale. In clean indoor air PM2.5 sits near 0 while this
+  count still reacts to cooking, candles and dust. The web PM2.5 tile also
+  notes PM1 and PM10, which indoors track PM2.5 closely.
 - **Humidity** is shown as absolute humidity (g/m³ of water vapour), which
   follows the air's actual moisture; relative humidity swings with
   temperature. %RH is still logged, and noted on the web page's tile.

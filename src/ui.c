@@ -18,7 +18,8 @@
  *   |  _/\___/\_   |  __/‾‾\__    |  ___/\___    |
  *   +--------------+--------------+--------------+
  *
- * Chart page, one per reading, plus one for light (dB re 1 lux):
+ * Chart page, one per reading, plus one for the >0.3 um particle count (log
+ * scale) and one for light (dB re 1 lux):
  *   | Temperature                       70.5 °F  |
  *   |  72.0 +--------------------------------+   |
  *   |       |        ___/‾‾‾\___             |   |
@@ -103,7 +104,8 @@ enum tile_id {
 	T_CO2,
 	T_TVOC,
 	T_TILES,		/* the readings above have dashboard tiles */
-	T_LIGHT = T_TILES,	/* chart page only; lux is in the status bar */
+	T_PC03 = T_TILES,	/* chart pages only: particles >0.3 um, */
+	T_LIGHT,		/* and light (lux is in the status bar) */
 	T_COUNT,
 };
 
@@ -126,11 +128,12 @@ static const struct {
 	[T_PM25] = { "PM2.5", "PM2.5", "ug/m3", 0, H_PM25, 10.0f, false, true },
 	[T_CO2] = { "CO2", "CO2", "ppm", 0, H_CO2, 200.0f, false, true },
 	[T_TVOC] = { "TVOC", "TVOC", "ppb", 0, H_TVOC, 50.0f, false, true },
+	[T_PC03] = { "Particles", "Particles >0.3 um", "/L", 0, H_PC03, 1.0f, true },
 	[T_LIGHT] = { "Light", "Light", "dB", 0, H_LUX, 10.0f, false },
 };
 
-/* Floor for log-scale charts: 0 lux (a dark room) plots as this. */
-#define LOG_FLOOR 0.1f
+/* Floor for log-scale charts: a count of 0 plots as this (1 per 0.1 L). */
+#define LOG_FLOOR 10.0f
 
 /*
  * Chart pages show the last 6 hours: the 1-minute history averaged in threes,
@@ -195,6 +198,7 @@ static bool warming(enum tile_id id, const struct readings *r)
 {
 	switch (id) {
 	case T_PM25:
+	case T_PC03:
 		return r->pm_warming;
 	case T_CO2:
 		return r->co2_warming;
@@ -236,6 +240,9 @@ static bool current_value(enum tile_id id, const struct readings *r, float *v)
 	case T_TVOC:
 		*v = (float)r->tvoc_ppb;
 		return r->gas_ok;
+	case T_PC03:
+		*v = (float)r->pc03_per_l;
+		return r->pm_ok;
 	case T_LIGHT:
 		*v = (float)light_db(r->lux);
 		return r->light_ok;
@@ -280,6 +287,11 @@ static void format(enum tile_id id, float v, char *buf, size_t len)
 
 	if (id == T_LIGHT && fabsf(v) < 10.0f) {
 		decimals = 1;
+	}
+	if (id == T_PC03 && v >= 10000.0f) {
+		/* Thousands, so axis labels fit. */
+		snprintf(buf, len, "%.0fk", (double)(v / 1000.0f));
+		return;
 	}
 	snprintf(buf, len, "%.*f", decimals, (double)v);
 }

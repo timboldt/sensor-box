@@ -29,6 +29,7 @@ struct readings {
 	int32_t pm1_0;
 	int32_t pm2_5;
 	int32_t pm10;
+	int32_t pc03_per_l;	/* particles >0.3 um per litre of air */
 
 	/* SGP30 (its eCO2, an estimate from TVOC, is only logged to the console).
 	 * gas_warming: alive but still in its ~15 s warm-up.

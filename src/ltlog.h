@@ -25,9 +25,10 @@ enum {
 	LTLOG_CO2 = BIT(4),	/* v4 on; earlier versions had SGP30 eCO2 here */
 	LTLOG_TVOC = BIT(5),
 	LTLOG_LUX = BIT(6),
+	LTLOG_PC03 = BIT(7),	/* v5 on */
 };
 
-/* One stored hour (36 bytes; 20 before v3). Decode with the ltlog_*() helpers below. */
+/* One stored hour (30 bytes; 26 in v3/v4, 20 before). Decode with the ltlog_*() helpers below. */
 struct ltlog_record {
 	uint32_t t;		/* UTC seconds at the start of the hour */
 	int16_t temp_c100;	/* degC x 100 */
@@ -43,6 +44,9 @@ struct ltlog_record {
 	uint16_t pm25_max;	/* ug/m3 */
 	uint16_t co2_max;	/* ppm */
 	uint16_t tvoc_max;	/* ppb */
+	/* v5 and later: particles >0.3 um per 0.1 L (the sensor's unit), and peak. */
+	uint16_t pc03;
+	uint16_t pc03_max;
 } __packed;
 
 /*
@@ -50,15 +54,16 @@ struct ltlog_record {
  * floor; v2 stores dB re 1 lux, reaching far below 1 lux; v3 adds the
  * pollutant peaks at the end (v1/v2 records are the first 20 bytes); v4
  * has true CO2 (SCD-4x) where earlier versions had the SGP30's eCO2, which
- * is dropped when read. All are read; fields a version doesn't have read
- * as zero (and not valid).
+ * is dropped when read; v5 adds the >0.3 um particle count. All are read;
+ * fields a version doesn't have read as zero (and not valid).
  */
-#define LTLOG_RECORD_VERSION 4
+#define LTLOG_RECORD_VERSION 5
 #define LTLOG_V2_SIZE        20
+#define LTLOG_V4_SIZE        26
 
 static inline bool ltlog_record_known(const struct ltlog_record *r)
 {
-	return r->version >= 1 && r->version <= 4;
+	return r->version >= 1 && r->version <= 5;
 }
 
 /* Whether the record has the pollutant peaks (pm25_max etc.). */
