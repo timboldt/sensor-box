@@ -11,7 +11,8 @@
  *                          15-minute one (10 s); points from before "uptime"
  *                          seconds ago are the boot-time backfill, not
  *                          measurements
- *   /api/history?since=T   the long-term hourly log from flash, from UTC T on
+ *   /api/history?since=T   the long-term hourly log from flash, from UTC T on,
+ *                          plus the hour so far ("current", or null)
  *
  * Values are metric; "us_units" in /api/now tells the page how to display
  * them. Missing values are null. There is no login: anyone on the LAN can
@@ -283,13 +284,42 @@ static int recent_handler(struct http_client_ctx *client, enum http_transaction_
 
 /* ---- /api/history?since=T (streamed in chunks) ---- */
 
+/* One /api/history row: [t, temp, rh, ...] in the order of "fields". */
+static void history_row(struct jbuf *j, const struct ltlog_record *r)
+{
+	jprintf(j, "[%u,", r->t);
+	jnum(j, r->valid & LTLOG_TEMP, r->temp_c100 / 100.0, 2);
+	jprintf(j, ",");
+	jnum(j, r->valid & LTLOG_RH, r->rh10 / 10.0, 1);
+	jprintf(j, ",");
+	jnum(j, r->valid & LTLOG_PRESS, r->press10 / 10.0, 1);
+	jprintf(j, ",");
+	jnum(j, r->valid & LTLOG_PM25, r->pm25, 0);
+	jprintf(j, ",");
+	jnum(j, r->valid & LTLOG_ECO2, r->eco2, 0);
+	jprintf(j, ",");
+	jnum(j, r->valid & LTLOG_TVOC, r->tvoc, 0);
+	jprintf(j, ",");
+	jprintf(j, (r->valid & LTLOG_LUX) ? "%.4g" : "null", ltlog_lux(r));
+	/* Peaks: null for records written before peaks were kept. */
+	bool peaks = ltlog_has_peaks(r);
+
+	jprintf(j, ",");
+	jnum(j, peaks && (r->valid & LTLOG_PM25), r->pm25_max, 0);
+	jprintf(j, ",");
+	jnum(j, peaks && (r->valid & LTLOG_ECO2), r->eco2_max, 0);
+	jprintf(j, ",");
+	jnum(j, peaks && (r->valid & LTLOG_TVOC), r->tvoc_max, 0);
+	jprintf(j, "]");
+}
+
 #define HIST_ROWS_PER_CHUNK 24
 
 static int history_handler(struct http_client_ctx *client, enum http_transaction_status status,
 			   const struct http_request_ctx *req, struct http_response_ctx *rsp,
 			   void *user_data)
 {
-	static char buf[HIST_ROWS_PER_CHUNK * 120 + 160];
+	static char buf[(HIST_ROWS_PER_CHUNK + 1) * 120 + 200];
 	static struct ltlog_cursor cur;
 	static uint32_t since;
 	static bool started;
@@ -334,35 +364,20 @@ static int history_handler(struct http_client_ctx *client, enum http_transaction
 		if (rec.t < since) {
 			continue;
 		}
-		jprintf(&j, "%s[%u,", first_row ? "" : ",", rec.t);
+		jprintf(&j, "%s", first_row ? "" : ",");
 		first_row = false;
-		jnum(&j, rec.valid & LTLOG_TEMP, rec.temp_c100 / 100.0, 2);
-		jprintf(&j, ",");
-		jnum(&j, rec.valid & LTLOG_RH, rec.rh10 / 10.0, 1);
-		jprintf(&j, ",");
-		jnum(&j, rec.valid & LTLOG_PRESS, rec.press10 / 10.0, 1);
-		jprintf(&j, ",");
-		jnum(&j, rec.valid & LTLOG_PM25, rec.pm25, 0);
-		jprintf(&j, ",");
-		jnum(&j, rec.valid & LTLOG_ECO2, rec.eco2, 0);
-		jprintf(&j, ",");
-		jnum(&j, rec.valid & LTLOG_TVOC, rec.tvoc, 0);
-		jprintf(&j, ",");
-		jprintf(&j, (rec.valid & LTLOG_LUX) ? "%.4g" : "null", ltlog_lux(&rec));
-		/* Peaks: null for records written before peaks were kept. */
-		bool peaks = ltlog_has_peaks(&rec);
-
-		jprintf(&j, ",");
-		jnum(&j, peaks && (rec.valid & LTLOG_PM25), rec.pm25_max, 0);
-		jprintf(&j, ",");
-		jnum(&j, peaks && (rec.valid & LTLOG_ECO2), rec.eco2_max, 0);
-		jprintf(&j, ",");
-		jnum(&j, peaks && (rec.valid & LTLOG_TVOC), rec.tvoc_max, 0);
-		jprintf(&j, "]");
+		history_row(&j, &rec);
 		rows++;
 	}
 	if (done) {
-		jprintf(&j, "]}");
+		/* The hour so far, so a chart's peaks can reach the present. */
+		jprintf(&j, "],\"current\":");
+		if (ltlog_current(&rec)) {
+			history_row(&j, &rec);
+		} else {
+			jprintf(&j, "null");
+		}
+		jprintf(&j, "}");
 	}
 	if (j.len >= j.size) {
 		LOG_ERR("history chunk truncated");

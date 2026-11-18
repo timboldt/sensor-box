@@ -86,6 +86,12 @@ int ltlog_init(void);
 void ltlog_add(const struct readings *r);
 
 /*
+ * The hour so far, as a record (not yet stored): its averages and peaks up to
+ * now. False if there is none yet (no readings, or the clock isn't set).
+ */
+bool ltlog_current(struct ltlog_record *rec);
+
+/*
  * Call cb for each stored record, oldest first, until it returns false.
  * Returns the number of records visited, or a negative error.
  */

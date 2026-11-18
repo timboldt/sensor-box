@@ -116,8 +116,8 @@ static uint16_t clamp_u16(double v)
 	return (uint16_t)CLAMP(lround(v), 0, UINT16_MAX);
 }
 
-/* Write the accumulated hour as a record. Under `lock`. */
-static int write_hour(void)
+/* The accumulated hour as a record. Under `lock`. False if it has no readings. */
+static bool make_record(struct ltlog_record *out)
 {
 	struct ltlog_record rec = {
 		.t = acc.hour,
@@ -131,8 +131,8 @@ static int write_hour(void)
 			rec.valid |= BIT(f);	/* LTLOG_* bits follow enum field */
 		}
 	}
-	if (rec.valid == 0) {
-		return 0;
+	if (acc.hour == 0 || rec.valid == 0) {
+		return false;
 	}
 
 	rec.temp_c100 = (int16_t)CLAMP(lround(avg[F_TEMP] * 100.0), INT16_MIN, INT16_MAX);
@@ -146,6 +146,18 @@ static int write_hour(void)
 	rec.pm25_max = clamp_u16(acc.max[F_PM25]);
 	rec.eco2_max = clamp_u16(acc.max[F_ECO2]);
 	rec.tvoc_max = clamp_u16(acc.max[F_TVOC]);
+	*out = rec;
+	return true;
+}
+
+/* Write the accumulated hour as a record. Under `lock`. */
+static int write_hour(void)
+{
+	struct ltlog_record rec;
+
+	if (!make_record(&rec)) {
+		return 0;
+	}
 
 	struct fcb_entry loc;
 	int ret = fcb_append(&fcb, sizeof(rec), &loc);
@@ -206,6 +218,15 @@ void ltlog_add(const struct readings *r)
 	add(F_LUX, r->light_ok, r->lux);
 
 	k_mutex_unlock(&lock);
+}
+
+bool ltlog_current(struct ltlog_record *rec)
+{
+	k_mutex_lock(&lock, K_FOREVER);
+	bool ok = make_record(rec);
+
+	k_mutex_unlock(&lock);
+	return ok;
 }
 
 /* Read the record at loc (any known version) into *rec. False if unusable. */
