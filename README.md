@@ -70,8 +70,10 @@ local network.
   +20 dB = 100 lux, -20 dB = 0.01 lux). The TSL2591's gain is adjusted
   automatically (x1 to x9200), so it reads from daylight down to about
   -37 dB (~0.0002 lux).
-- **Dark room:** the backlight switches off below 1 lux. A press of Boot
-  turns it on for 30 s (that first press only wakes the screen).
+- **Backlight:** dims with the room light, from full brightness at 15 lux
+  and up to 1% at 0.02 lux, and switches off below 0.01 lux. In a dark room a
+  press of Boot turns it on, dimly, for 30 s (that first press only wakes
+  the screen).
 
 ## Hardware
 
@@ -102,7 +104,7 @@ No RTC: wall-clock time, when needed, will come from SNTP over Wi-Fi.
 | `src/ltlog.c` | Hourly long-term history in flash (FCB) |
 | `src/web.c`, `web/` | Web dashboard: HTTP server, JSON API and the page |
 | `src/light.c` | TSL2591 auto-gain and lux calculation |
-| `src/backlight.c` | Backlight on/off from ambient light |
+| `src/backlight.c` | Backlight brightness from ambient light |
 | `app.overlay` | Devicetree for the I2C sensors and the SPI display |
 | `prj.conf`, `Kconfig` | Application Kconfig and its app-specific options |
 | `boards/adafruit/feather_esp32c6/` | Board definition (also holds the FeatherWing pin wiring) |
