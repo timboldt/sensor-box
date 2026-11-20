@@ -5,21 +5,27 @@
  *
  *   /                      the dashboard page (web/index.html, gzipped)
  *   /api/now               current readings
- *   /api/recent[?window=short][&points=N]
+ *   /api/recent[?window=short][&points=N][&group=G]
  *                          the last N points of the 24-hour RAM history
  *                          (1-minute averages), or with window=short the
- *                          15-minute one (10 s); points from before
+ *                          15-minute one (10 s); with group=G each point
+ *                          averages G of those (period G times as long), so
+ *                          a day's chart needn't fetch every minute; points
+ *                          from before
  *                          "covered" seconds ago (the uptime, or more if
  *                          history was restored from the SD card at boot)
  *                          are the boot-time backfill, not measurements
  *   /api/history?since=T   the long-term hourly log from flash, from UTC T on,
  *                          plus the hour so far ("current", or null)
- *   /api/minutes?since=T&until=U
+ *   /api/minutes?since=T&until=U[&step=S]
  *                          the SD card's minute log (CSV, as on the card),
  *                          the lines from UTC T to U (at most 2 days), each
  *                          file's lines after its own header row; empty
  *                          without a card. The last few minutes may not be
- *                          on the card yet.
+ *                          on the card yet. With step=S (a divisor of a
+ *                          day's 1440 minutes), S-minute averages of just
+ *                          the charted columns instead, each row at its
+ *                          slot's start.
  *
  * Values are metric; "us_units" in /api/now tells the page how to display
  * them. Missing values are null. There is no login: anyone on the LAN can
@@ -180,9 +186,10 @@ static int now_handler(struct http_client_ctx *client, enum http_transaction_sta
 	return respond_json(rsp, &j);
 }
 
-/* ---- /api/recent[?window=short][&points=N] (streamed in chunks) ---- */
+/* ---- /api/recent[?window=short][&points=N][&group=G] (streamed in chunks) ---- */
 
 #define RECENT_POINTS_PER_CHUNK 240
+#define RECENT_MAX_GROUP        60
 
 static int recent_handler(struct http_client_ctx *client, enum http_transaction_status status,
 			  const struct http_request_ctx *req, struct http_response_ctx *rsp,
@@ -198,12 +205,13 @@ static int recent_handler(struct http_client_ctx *client, enum http_transaction_
 		{ "lux", H_LUX, -1 },
 	};
 	static char buf[RECENT_POINTS_PER_CHUNK * 12 + 256];
-	static float pts[RECENT_POINTS_PER_CHUNK];
+	static float raw[RECENT_MAX_GROUP];
 	/* Where the response has got to, between chunks. */
 	static bool started;
 	static enum history_window w;
 	static uint32_t first;		/* sequence number of the oldest point sent */
 	static int count;		/* points per series */
+	static int group;		/* buckets averaged into each point */
 	static size_t si;		/* series being sent */
 	static int pos;			/* next point of that series */
 	struct jbuf j = { buf, sizeof(buf), 0 };
@@ -226,8 +234,10 @@ static int recent_handler(struct http_client_ctx *client, enum http_transaction_
 		w = strstr(q, "window=short") != NULL ? HW_SHORT : HW_LONG;
 		int len = w == HW_SHORT ? HISTORY_SHORT_LEN : HISTORY_LEN;
 
+		p = strstr(q, "group=");
+		group = p ? CLAMP(atoi(p + 6), 1, RECENT_MAX_GROUP) : 1;
 		p = strstr(q, "points=");
-		count = p ? CLAMP(atoi(p + 7), 1, len) : len;
+		count = p ? CLAMP(atoi(p + 7), 1, len / group) : len / group;
 
 		/*
 		 * Every series is read up to the same completed bucket, so they
@@ -236,8 +246,8 @@ static int recent_handler(struct http_client_ctx *client, enum http_transaction_
 		int64_t age_ms;
 		uint32_t end = history_snapshot(w, &age_ms);
 
-		count = MIN(count, (int)end);
-		first = end - count;
+		count = MIN(count, (int)(end / group));
+		first = end - count * group;
 		si = 0;
 		pos = 0;
 		started = true;
@@ -252,7 +262,7 @@ static int recent_handler(struct http_client_ctx *client, enum http_transaction_
 		 */
 		jprintf(&j, "{\"period\":%d,\"uptime\":%lld,\"covered\":%lld,\"age\":%lld,"
 			    "\"t\":",
-			w == HW_SHORT ? HISTORY_SHORT_PERIOD_S : HISTORY_PERIOD_S,
+			(w == HW_SHORT ? HISTORY_SHORT_PERIOD_S : HISTORY_PERIOD_S) * group,
 			k_uptime_get() / 1000, history_covered_s(w), age_ms / 1000);
 		jnum(&j, timesync_valid(), (double)timesync_now(), 0);
 	}
@@ -266,13 +276,26 @@ static int recent_handler(struct http_client_ctx *client, enum http_transaction_
 		}
 		int n = MIN(count - pos, RECENT_POINTS_PER_CHUNK - sent);
 
-		history_get_seq(w, series[si].s, first + pos, n, pts);
 		for (int k = 0; k < n; k++) {
+			/* The average of the point's buckets that have a value. */
+			double sum = 0.0;
+			int got = 0;
+
+			history_get_seq(w, series[si].s, first + (uint32_t)(pos + k) * group, group,
+					raw);
+			for (int g = 0; g < group; g++) {
+				if (!isnan(raw[g])) {
+					sum += (double)raw[g];
+					got++;
+				}
+			}
+			float v = got ? (float)(sum / got) : NAN;
+
 			jprintf(&j, pos + k ? "," : "");
 			if (series[si].decimals < 0) {
-				jprintf(&j, isnan(pts[k]) ? "null" : "%.4g", (double)pts[k]);
+				jprintf(&j, isnan(v) ? "null" : "%.4g", (double)v);
 			} else {
-				jnum(&j, true, pts[k], series[si].decimals);
+				jnum(&j, true, v, series[si].decimals);
 			}
 		}
 		pos += n;
@@ -418,13 +441,55 @@ static int history_handler(struct http_client_ctx *client, enum http_transaction
 
 #define MINUTES_MAX_SPAN (2 * 86400)
 #define MINUTES_CHUNK    3072	/* send about this much at a time */
-#define MINUTES_READ     1024	/* read the card this much at a time */
+#define MINUTES_READ     4096	/* read the card this much at a time */
 #define MINUTES_LINE     512
 
 static const struct http_header csv_headers[] = {
 	{ .name = "Content-Type", .value = "text/csv" },
 	{ .name = "Cache-Control", .value = "no-store" },
 };
+
+/*
+ * The columns averaged with step=S, as named in the log's header, and how
+ * they're printed (decimals < 0: 4 significant digits).
+ */
+static const struct {
+	const char *name;
+	int decimals;
+} step_cols[] = {
+	{ "temp_c", 2 }, { "ah_g_m3", 2 }, { "press_hpa", 1 }, { "pm25", 1 }, { "co2_ppm", 0 },
+	{ "tvoc_ppb", 0 }, { "pc03_per_l", 0 }, { "lux", -1 }, { "batt_ma", 1 },
+};
+
+#define STEP_COLS  ARRAY_SIZE(step_cols)
+#define MAX_FIELDS 48
+
+/* The slot being averaged (step=S), between lines and chunks. */
+static struct {
+	int step;		/* minutes; 1 = send the log's lines as they are */
+	int nfields;		/* in this file's header */
+	int col[STEP_COLS];	/* field index of each column, -1 if absent */
+	time_t slot;		/* start of the slot being summed; 0 = none */
+	double sum[STEP_COLS];
+	int n[STEP_COLS];
+} agg;
+
+/* Split a CSV line in place. Returns the number of fields. */
+static int split_fields(char *line, char *field[], int max)
+{
+	int n = 0;
+	char *p = line;
+
+	while (n < max) {
+		field[n++] = p;
+		p = strchr(p, ',');
+		if (p == NULL) {
+			break;
+		}
+		*p++ = '\0';
+	}
+	return n;
+}
 
 /* "2026-11-18T04:33:00Z": the log's time format, which sorts as text. */
 static void iso_minute(time_t t, char *out, size_t size)
@@ -470,6 +535,83 @@ static size_t seek_minute(const char *path, const char *iso)
 	return lo;
 }
 
+/* Append the slot being averaged, if any, as a CSV row; then clear it. */
+static void agg_emit(char *out, size_t *len)
+{
+	if (agg.slot == 0) {
+		return;
+	}
+
+	char t[40];
+
+	iso_minute(agg.slot, t, sizeof(t));
+	*len += sprintf(out + *len, "%s", t);
+	for (size_t c = 0; c < STEP_COLS; c++) {
+		out[(*len)++] = ',';
+		if (agg.n[c] == 0) {
+			continue;
+		}
+		double v = agg.sum[c] / agg.n[c];
+
+		if (step_cols[c].decimals < 0) {
+			*len += sprintf(out + *len, "%.4g", v);
+		} else {
+			*len += sprintf(out + *len, "%.*f", step_cols[c].decimals, v);
+		}
+	}
+	out[(*len)++] = '\n';
+	memset(&agg.sum, 0, sizeof(agg.sum));
+	memset(&agg.n, 0, sizeof(agg.n));
+	agg.slot = 0;
+}
+
+/* A file's header row (step=S): find the columns, send our own header. */
+static void agg_header(char *line, char *out, size_t *len)
+{
+	char *field[MAX_FIELDS];
+
+	agg.nfields = split_fields(line, field, MAX_FIELDS);
+	*len += sprintf(out + *len, "time");
+	for (size_t c = 0; c < STEP_COLS; c++) {
+		agg.col[c] = -1;
+		for (int i = 0; i < agg.nfields; i++) {
+			if (strcmp(field[i], step_cols[c].name) == 0) {
+				agg.col[c] = i;
+			}
+		}
+		*len += sprintf(out + *len, ",%s", step_cols[c].name);
+	}
+	out[(*len)++] = '\n';
+}
+
+/* A minute in range (step=S): add it to its slot, sending the last one. */
+static void agg_line(char *line, char *out, size_t *len)
+{
+	char *field[MAX_FIELDS];
+	int y, mo, d, h, mi;
+
+	if (split_fields(line, field, MAX_FIELDS) != agg.nfields ||
+	    sscanf(field[0], "%4d-%2d-%2dT%2d:%2d", &y, &mo, &d, &h, &mi) != 5) {
+		return;		/* torn or damaged line */
+	}
+
+	time_t t = (time_t)(days_from_civil(y, mo, d) * 86400 + h * 3600 + mi * 60);
+	time_t slot = t - t % (agg.step * 60);
+
+	if (slot != agg.slot) {
+		agg_emit(out, len);
+		agg.slot = slot;
+	}
+	for (size_t c = 0; c < STEP_COLS; c++) {
+		const char *f = agg.col[c] >= 0 ? field[agg.col[c]] : "";
+
+		if (*f != '\0') {
+			agg.sum[c] += strtod(f, NULL);
+			agg.n[c]++;
+		}
+	}
+}
+
 static int minutes_handler(struct http_client_ctx *client, enum http_transaction_status status,
 			   const struct http_request_ctx *req, struct http_response_ctx *rsp,
 			   void *user_data)
@@ -499,7 +641,7 @@ static int minutes_handler(struct http_client_ctx *client, enum http_transaction
 
 	if (!started) {
 		/* First call: the query string (if any) is in req->data. */
-		char q[64] = "";
+		char q[80] = "";
 		const char *p;
 
 		memcpy(q, req->data, MIN(req->data_len, sizeof(q) - 1));
@@ -507,6 +649,11 @@ static int minutes_handler(struct http_client_ctx *client, enum http_transaction
 		time_t until = p ? (time_t)strtoul(p + 6, NULL, 10) : timesync_now();
 		p = strstr(q, "since=");
 		time_t since = p ? (time_t)strtoul(p + 6, NULL, 10) : until - 86400;
+		p = strstr(q, "step=");
+		int step = p ? atoi(p + 5) : 1;
+
+		memset(&agg, 0, sizeof(agg));
+		agg.step = step >= 1 && step <= 1440 && 1440 % step == 0 ? step : 1;
 
 		since = MAX(since, until - MINUTES_MAX_SPAN);
 		iso_minute(since, from_iso, sizeof(from_iso));
@@ -526,6 +673,7 @@ static int minutes_handler(struct http_client_ctx *client, enum http_transaction
 
 	while (len < MINUTES_CHUNK) {
 		if (day > last_day || !sdcard_ready()) {
+			agg_emit(out, &len);
 			done = true;
 			break;
 		}
@@ -545,14 +693,21 @@ static int minutes_handler(struct http_client_ctx *client, enum http_transaction
 			}
 			size_t hl = nl - piece;
 
-			memcpy(out + len, piece, hl);
-			len += hl;
-			if (len > 0 && out[len - 1] == '\r') {
-				len--;
+			if (hl > 0 && piece[hl - 1] == '\r') {
+				hl--;
 			}
-			out[len++] = '\n';
+			if (agg.step > 1) {
+				hl = MIN(hl, sizeof(line) - 1);
+				memcpy(line, piece, hl);
+				line[hl] = '\0';
+				agg_header(line, out, &len);
+			} else {
+				memcpy(out + len, piece, hl);
+				len += hl;
+				out[len++] = '\n';
+			}
 			header_seen = true;
-			offset = hl + 1;
+			offset = nl + 1 - piece;
 			if (day == first_day) {
 				offset = MAX(offset, seek_minute(path, from_iso));
 			}
@@ -563,6 +718,7 @@ static int minutes_handler(struct http_client_ctx *client, enum http_transaction
 
 		if (n <= 0) {
 			/* End of this file, or none for that day: on to the next. */
+			agg_emit(out, &len);
 			day += 86400;
 			offset = 0;
 			line_len = 0;
@@ -600,7 +756,9 @@ static int minutes_handler(struct http_client_ctx *client, enum http_transaction
 				/* Lines are in time order: the rest of the file is later. */
 				offset = SIZE_MAX;
 			}
-			if (keep) {
+			if (keep && agg.step > 1) {
+				agg_line(line, out, &len);
+			} else if (keep) {
 				memcpy(out + len, line, line_len);
 				len += line_len;
 				out[len++] = '\n';
