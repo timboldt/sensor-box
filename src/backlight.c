@@ -3,25 +3,29 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * On/off only: full brightness looks right even in a dim (~12 lux) room, so
- * the backlight just turns off when the room is dark enough to sleep.
+ * Brightness follows the room light:
  *
- *   lux < DARK_OFF_LUX   -> off
- *   lux >= DARK_ON_LUX   -> on (full brightness)
+ *   lux < DARK_OFF_LUX           -> off
+ *   DARK_ON_LUX .. FULL_LUX      -> MIN_PM rising to full, evenly per
+ *                                   decade of lux (the eye's scale)
+ *   lux >= FULL_LUX              -> full brightness
  *
- * The gap between the two thresholds is hysteresis, so light hovering around
- * the cutoff does not make it flicker. Switching fades over FADE_MS rather
- * than snapping. PWM is still used for the fade and for the "backlight"
- * shell command.
+ * Off and back on have different thresholds (hysteresis), so light hovering
+ * around the cutoff does not make it flicker, and while on, the target only
+ * moves when it changes by more than 1/RETARGET_FRACTION, so sensor noise
+ * doesn't keep it fading. Every change fades over FADE_MS rather than
+ * snapping.
  *
- * backlight_wake() (the Boot button) turns it on for WAKE_MS even in a dark
- * room, so the readings can be checked at night without the room lights.
+ * backlight_wake() (the Boot button) turns it on, at MIN_PM, for WAKE_MS even
+ * in a dark room, so the readings can be checked at night without the room
+ * lights.
  *
  * Callers are the sensor loop, the input thread and the shell; the fade and
  * wake-expiry run on the system workqueue. All state is under `lock`.
  */
 
 #include <errno.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -35,12 +39,21 @@
 
 LOG_MODULE_REGISTER(backlight, LOG_LEVEL_INF);
 
-#define DARK_OFF_LUX 1.0
-#define DARK_ON_LUX  2.0
+#define DARK_OFF_LUX 0.01
+#define DARK_ON_LUX  0.02
+#define FULL_LUX     15.0
+#define MIN_PM       10		/* brightness at DARK_ON_LUX (1%) */
+#define RETARGET_FRACTION 8	/* ignore changes under 1/8 (12.5%) */
 
 #define FADE_MS      1500
 #define FADE_STEP_MS 20
 #define WAKE_MS      30000
+/*
+ * Missed readings in a row before giving up on the sensor and going to full
+ * brightness. An odd miss is routine (e.g. the reading after the light
+ * clipped). Readings come every second, so this is about 30 s.
+ */
+#define MISSES_BEFORE_FAIL 30
 
 static const struct pwm_dt_spec pwm = PWM_DT_SPEC_GET(DT_NODELABEL(tft_backlight));
 
@@ -53,7 +66,8 @@ static int step_pm;
 
 /* Inputs to the on/off decision. */
 static bool dark;
-static bool last_lux_ok;
+static bool last_lux_ok;	/* false: no reading for MISSES_BEFORE_FAIL */
+static int misses;		/* missed readings in a row */
 static double last_lux;
 static int manual_pm = -1;	/* from the shell: fixed permille, or -1 for auto */
 static bool woken;		/* button pressed in the last WAKE_MS */
@@ -92,6 +106,24 @@ static void fade_step(struct k_work *work)
 	k_mutex_unlock(&lock);
 }
 
+/*
+ * Brightness (permille) for a lit room: MIN_PM at DARK_ON_LUX up to 1000 at
+ * FULL_LUX, a constant ratio per decade of lux.
+ */
+static int lux_to_pm(double lux)
+{
+	if (lux >= FULL_LUX) {
+		return 1000;
+	}
+	if (lux <= DARK_ON_LUX) {
+		return MIN_PM;
+	}
+
+	double f = log(lux / DARK_ON_LUX) / log(FULL_LUX / DARK_ON_LUX);
+
+	return (int)lround(MIN_PM * pow(1000.0 / MIN_PM, f));
+}
+
 /* Fade to whatever the current inputs call for. Call with `lock` held. */
 static void reevaluate(void)
 {
@@ -102,8 +134,18 @@ static void reevaluate(void)
 	} else if (!last_lux_ok) {
 		/* No light reading: fail bright rather than dark. */
 		new_target = 1000;
+	} else if (dark) {
+		new_target = woken ? MIN_PM : 0;
 	} else {
-		new_target = (dark && !woken) ? 0 : 1000;
+		new_target = lux_to_pm(last_lux);
+		/*
+		 * Small changes while on are noise: hold the current level,
+		 * except to reach either end of the scale exactly.
+		 */
+		if (target_pm > 0 && new_target != 1000 && new_target != MIN_PM &&
+		    abs(new_target - target_pm) * RETARGET_FRACTION < target_pm) {
+			new_target = target_pm;
+		}
 	}
 
 	if (new_target == target_pm) {
@@ -151,16 +193,23 @@ void backlight_set_ambient(bool lux_ok, double lux)
 
 	k_mutex_lock(&lock, K_FOREVER);
 
-	last_lux_ok = lux_ok;
-	last_lux = lux;
 	if (!lux_ok) {
-		dark = false;
-	} else if (dark && lux >= DARK_ON_LUX) {
-		dark = false;
-		LOG_INF("room light (%.1f lux): backlight on", lux);
-	} else if (!dark && lux < DARK_OFF_LUX) {
-		dark = true;
-		LOG_INF("room dark (%.1f lux): backlight off", lux);
+		/* Hold the last level through a brief gap; then fail bright. */
+		if (++misses >= MISSES_BEFORE_FAIL) {
+			last_lux_ok = false;
+			dark = false;
+		}
+	} else {
+		misses = 0;
+		last_lux_ok = true;
+		last_lux = lux;
+		if (dark && lux >= DARK_ON_LUX) {
+			dark = false;
+			LOG_INF("room light (%.3g lux): backlight on", lux);
+		} else if (!dark && lux < DARK_OFF_LUX) {
+			dark = true;
+			LOG_INF("room dark (%.3g lux): backlight off", lux);
+		}
 	}
 	reevaluate();
 

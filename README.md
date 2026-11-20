@@ -70,8 +70,10 @@ local network.
   +20 dB = 100 lux, -20 dB = 0.01 lux). The TSL2591's gain is adjusted
   automatically (x1 to x9200), so it reads from daylight down to about
   -37 dB (~0.0002 lux).
-- **Dark room:** the backlight switches off below 1 lux. A press of Boot
-  turns it on for 30 s (that first press only wakes the screen).
+- **Backlight:** dims with the room light, from full brightness at 15 lux
+  and up to 1% at 0.02 lux, and switches off below 0.01 lux. In a dark room a
+  press of Boot turns it on, dimly, for 30 s (that first press only wakes
+  the screen).
 
 ## Hardware
 
@@ -102,7 +104,7 @@ No RTC: wall-clock time, when needed, will come from SNTP over Wi-Fi.
 | `src/ltlog.c` | Hourly long-term history in flash (FCB) |
 | `src/web.c`, `web/` | Web dashboard: HTTP server, JSON API and the page |
 | `src/light.c` | TSL2591 auto-gain and lux calculation |
-| `src/backlight.c` | Backlight on/off from ambient light |
+| `src/backlight.c` | Backlight brightness from ambient light |
 | `app.overlay` | Devicetree for the I2C sensors and the SPI display |
 | `prj.conf`, `Kconfig` | Application Kconfig and its app-specific options |
 | `boards/adafruit/feather_esp32c6/` | Board definition (also holds the FeatherWing pin wiring) |
@@ -115,7 +117,9 @@ No RTC: wall-clock time, when needed, will come from SNTP over Wi-Fi.
 Once on Wi-Fi, open **http://sensor-box.local** (or the IP address the box
 logs at boot) on any device on the same network. It shows the current
 readings and trend charts for the last 10 minutes, hour, 4 hours, day,
-week, month or 3 months, in your browser's time zone. There is no login: anyone
+week, month or 3 months, in your browser's time zone. Click a chart to zoom
+in to the next shorter range around that moment; ← and → step through time
+and Now returns to the present. There is no login: anyone
 on the network can view it, and nothing can be changed from it.
 
 The page is `web/index.html`, built into the firmware. The JSON behind it
@@ -126,6 +130,7 @@ can also be used directly (values are metric; missing values are `null`):
 | `/api/now` | Current readings |
 | `/api/recent` | Last 24 hours, 1-minute averages, oldest first (`?points=N` for the last N; `?window=short`: last 15 minutes, 10 s); includes `covered`, how many seconds back the real data goes (the uptime, or more if restored from the SD card; older points are a placeholder), and `age`, how long ago the newest point ended |
 | `/api/history?since=<unix time>` | Hourly averages and peaks from flash, plus the hour so far (`current`) |
+| `/api/minutes?since=<unix time>&until=<unix time>` | The SD card's minute log for that span (at most 2 days), as CSV straight from the card, each day's file after its own header row; empty without a card |
 
 ## Wi-Fi
 

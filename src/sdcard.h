@@ -36,6 +36,13 @@ int sdcard_append(const char *dir, const char *path, const char *header, const c
 int sdcard_read(const char *path, bool (*cb)(const char *data, size_t len, void *arg),
 		void *arg);
 
+/*
+ * Read up to len bytes of the file `path` from byte `offset`, for reading a
+ * file a piece at a time. Returns the number of bytes read (0 at the end),
+ * or a negative error (-ENOENT: no such file; -ENODEV: no card).
+ */
+int sdcard_read_at(const char *path, size_t offset, char *buf, size_t len);
+
 /* Called (once) before "sdcard unmount", e.g. to write out buffered data. */
 void sdcard_set_unmount_hook(void (*hook)(void));
 

@@ -14,6 +14,12 @@
  *                          are the boot-time backfill, not measurements
  *   /api/history?since=T   the long-term hourly log from flash, from UTC T on,
  *                          plus the hour so far ("current", or null)
+ *   /api/minutes?since=T&until=U
+ *                          the SD card's minute log (CSV, as on the card),
+ *                          the lines from UTC T to U (at most 2 days), each
+ *                          file's lines after its own header row; empty
+ *                          without a card. The last few minutes may not be
+ *                          on the card yet.
  *
  * Values are metric; "us_units" in /api/now tells the page how to display
  * them. Missing values are null. There is no login: anyone on the LAN can
@@ -25,6 +31,7 @@
 
 #include <math.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,6 +43,8 @@
 
 #include "history.h"
 #include "ltlog.h"
+#include "sdcard.h"
+#include "sdlog.h"
 #include "timesync.h"
 #include "web.h"
 
@@ -405,6 +414,211 @@ static int history_handler(struct http_client_ctx *client, enum http_transaction
 	return 0;
 }
 
+/* ---- /api/minutes?since=T&until=U (CSV, streamed in chunks) ---- */
+
+#define MINUTES_MAX_SPAN (2 * 86400)
+#define MINUTES_CHUNK    3072	/* send about this much at a time */
+#define MINUTES_READ     1024	/* read the card this much at a time */
+#define MINUTES_LINE     512
+
+static const struct http_header csv_headers[] = {
+	{ .name = "Content-Type", .value = "text/csv" },
+	{ .name = "Cache-Control", .value = "no-store" },
+};
+
+/* "2026-11-18T04:33:00Z": the log's time format, which sorts as text. */
+static void iso_minute(time_t t, char *out, size_t size)
+{
+	struct tm tm;
+
+	gmtime_r(&t, &tm);
+	snprintf(out, size, "%04d-%02d-%02dT%02d:%02d:00Z", tm.tm_year + 1900, tm.tm_mon + 1,
+		 tm.tm_mday, tm.tm_hour, tm.tm_min);
+}
+
+/*
+ * A line start in the file `path` at or before its first minute >= iso, so
+ * reading needn't start from the top: a binary search on the lines' times,
+ * which are in order. 0 if nothing better is found.
+ */
+static size_t seek_minute(const char *path, const char *iso)
+{
+	static char probe[320];
+	size_t lo = 0, hi = 4 * 1024 * 1024;	/* far more than a day's file */
+
+	while (hi - lo > sizeof(probe)) {
+		size_t mid = lo + (hi - lo) / 2;
+		int n = sdcard_read_at(path, mid, probe, sizeof(probe));
+
+		if (n <= 0) {
+			hi = mid;	/* past the end */
+			continue;
+		}
+
+		const char *nl = memchr(probe, '\n', n);
+
+		if (nl == NULL || probe + n - (nl + 1) < 20) {
+			hi = mid;	/* no whole timestamp here: look earlier */
+			continue;
+		}
+		if (strncmp(nl + 1, iso, 20) < 0) {
+			lo = mid + (nl + 1 - probe);	/* that line is before iso */
+		} else {
+			hi = mid;
+		}
+	}
+	return lo;
+}
+
+static int minutes_handler(struct http_client_ctx *client, enum http_transaction_status status,
+			   const struct http_request_ctx *req, struct http_response_ctx *rsp,
+			   void *user_data)
+{
+	static char out[MINUTES_CHUNK + MINUTES_READ + MINUTES_LINE];
+	static char piece[MINUTES_READ];
+	/* Where the response has got to, between chunks. */
+	static bool started;
+	static char from_iso[40], to_iso[40];
+	static time_t day, first_day, last_day;	/* the file being read; the range */
+	static size_t offset;		/* in that file */
+	static char line[MINUTES_LINE];
+	static size_t line_len;
+	static bool overlong;		/* the current line didn't fit: skip it */
+	static bool header_seen;	/* in this file */
+	size_t len = 0;
+	bool done = false;
+
+	if (status == HTTP_SERVER_TRANSACTION_ABORTED ||
+	    status == HTTP_SERVER_TRANSACTION_COMPLETE) {
+		started = false;
+		return 0;
+	}
+	if (status != HTTP_SERVER_REQUEST_DATA_FINAL) {
+		return 0;
+	}
+
+	if (!started) {
+		/* First call: the query string (if any) is in req->data. */
+		char q[64] = "";
+		const char *p;
+
+		memcpy(q, req->data, MIN(req->data_len, sizeof(q) - 1));
+		p = strstr(q, "until=");
+		time_t until = p ? (time_t)strtoul(p + 6, NULL, 10) : timesync_now();
+		p = strstr(q, "since=");
+		time_t since = p ? (time_t)strtoul(p + 6, NULL, 10) : until - 86400;
+
+		since = MAX(since, until - MINUTES_MAX_SPAN);
+		iso_minute(since, from_iso, sizeof(from_iso));
+		iso_minute(until, to_iso, sizeof(to_iso));
+		day = first_day = since - since % 86400;
+		last_day = until - until % 86400;
+		offset = 0;
+		line_len = 0;
+		overlong = false;
+		header_seen = false;
+		started = true;
+
+		rsp->status = HTTP_200_OK;
+		rsp->headers = csv_headers;
+		rsp->header_count = ARRAY_SIZE(csv_headers);
+	}
+
+	while (len < MINUTES_CHUNK) {
+		if (day > last_day || !sdcard_ready()) {
+			done = true;
+			break;
+		}
+
+		char path[48];
+
+		sdlog_path(day, path, sizeof(path));
+
+		if (!header_seen) {
+			/* Send the file's header row, then skip to the range's start. */
+			int n = sdcard_read_at(path, 0, piece, sizeof(piece));
+			const char *nl = n > 0 ? memchr(piece, '\n', n) : NULL;
+
+			if (nl == NULL) {
+				day += 86400;	/* no such file, or no header */
+				continue;
+			}
+			size_t hl = nl - piece;
+
+			memcpy(out + len, piece, hl);
+			len += hl;
+			if (len > 0 && out[len - 1] == '\r') {
+				len--;
+			}
+			out[len++] = '\n';
+			header_seen = true;
+			offset = hl + 1;
+			if (day == first_day) {
+				offset = MAX(offset, seek_minute(path, from_iso));
+			}
+			continue;
+		}
+
+		int n = sdcard_read_at(path, offset, piece, sizeof(piece));
+
+		if (n <= 0) {
+			/* End of this file, or none for that day: on to the next. */
+			day += 86400;
+			offset = 0;
+			line_len = 0;
+			overlong = false;
+			header_seen = false;
+			continue;
+		}
+		offset += n;
+
+		for (int i = 0; i < n; i++) {
+			char ch = piece[i];
+
+			if (ch == '\r') {
+				continue;
+			}
+			if (ch != '\n') {
+				if (line_len < sizeof(line) - 1) {
+					line[line_len++] = ch;
+				} else {
+					overlong = true;
+				}
+				continue;
+			}
+
+			/* A whole line: the header, or a minute in range. */
+			line[line_len] = '\0';
+			bool keep = false;
+
+			if (overlong || line_len == 0) {
+				/* skip */
+			} else if (strncmp(line, from_iso, 20) >= 0 &&
+				   strncmp(line, to_iso, 20) <= 0) {
+				keep = true;
+			} else if (strncmp(line, to_iso, 20) > 0) {
+				/* Lines are in time order: the rest of the file is later. */
+				offset = SIZE_MAX;
+			}
+			if (keep) {
+				memcpy(out + len, line, line_len);
+				len += line_len;
+				out[len++] = '\n';
+			}
+			line_len = 0;
+			overlong = false;
+			if (offset == SIZE_MAX) {
+				break;
+			}
+		}
+	}
+
+	rsp->body = (const uint8_t *)out;
+	rsp->body_len = len;
+	rsp->final_chunk = done;
+	return 0;
+}
+
 /* ---- the page and the service ---- */
 
 static const uint8_t index_html_gz[] = {
@@ -434,6 +648,7 @@ static struct http_resource_detail_static index_detail = {
 DYNAMIC(now_detail, now_handler);
 DYNAMIC(recent_detail, recent_handler);
 DYNAMIC(history_detail, history_handler);
+DYNAMIC(minutes_detail, minutes_handler);
 
 static uint16_t http_port = 80;
 
@@ -443,6 +658,7 @@ HTTP_RESOURCE_DEFINE(index_res, dashboard, "/", &index_detail);
 HTTP_RESOURCE_DEFINE(now_res, dashboard, "/api/now", &now_detail);
 HTTP_RESOURCE_DEFINE(recent_res, dashboard, "/api/recent", &recent_detail);
 HTTP_RESOURCE_DEFINE(history_res, dashboard, "/api/history", &history_detail);
+HTTP_RESOURCE_DEFINE(minutes_res, dashboard, "/api/minutes", &minutes_detail);
 
 void web_init(void)
 {

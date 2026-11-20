@@ -142,12 +142,9 @@ static int flush_locked(void)
 	if (low_batt) {
 		ret = -EBUSY;
 	} else {
-		struct tm tm;
 		char path[sizeof(last_file)];
 
-		gmtime_r(&buf_day, &tm);
-		snprintf(path, sizeof(path), LOG_DIR "/%04d%02d%02d.CSV", tm.tm_year + 1900,
-			 tm.tm_mon + 1, tm.tm_mday);
+		sdlog_path(buf_day, path, sizeof(path));
 		ret = sdcard_append(LOG_DIR, path, header, buf, used);
 		if (ret == 0) {
 			strcpy(last_file, path);
@@ -166,6 +163,16 @@ static int flush_locked(void)
 	last_err = ret;
 	used = 0;
 	return ret;
+}
+
+void sdlog_path(time_t t, char *path, size_t size)
+{
+	struct tm tm;
+	time_t day = t - t % 86400;
+
+	gmtime_r(&day, &tm);
+	snprintf(path, size, LOG_DIR "/%04d%02d%02d.CSV", tm.tm_year + 1900, tm.tm_mon + 1,
+		 tm.tm_mday);
 }
 
 int sdlog_flush(void)
@@ -417,12 +424,9 @@ static void restore_history(void)
 
 	/* Yesterday's file, then today's (UTC). */
 	for (time_t day = c.from - c.from % 86400; day <= now; day += 86400) {
-		struct tm tm;
 		char path[48];
 
-		gmtime_r(&day, &tm);
-		snprintf(path, sizeof(path), LOG_DIR "/%04d%02d%02d.CSV", tm.tm_year + 1900,
-			 tm.tm_mon + 1, tm.tm_mday);
+		sdlog_path(day, path, sizeof(path));
 		c.len = 0;
 		c.overlong = false;
 		c.nfields = 0;

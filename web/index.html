@@ -25,7 +25,20 @@
   main { max-width: 1100px; margin: 0 auto; padding: 16px; }
   header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; }
   h1 { font-size: 22px; margin: 0; }
-  h2 { font-size: 16px; margin: 28px 0 10px; display: flex; align-items: center; gap: 12px; }
+  h2 { font-size: 16px; margin: 28px 0 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+  .when { color: var(--muted); font-size: 13px; font-weight: 400; font-variant-numeric: tabular-nums; }
+  .busy { display: none; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; font-weight: 400; }
+  .busy.on { display: inline-flex; }
+  .busy.failed { color: var(--bad); }
+  .spin {
+    width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--grid);
+    border-top-color: var(--line); animation: spin 0.8s linear infinite;
+  }
+  .busy.failed .spin { display: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2.4s; } }
+  .charts { transition: opacity 0.15s; }
+  .charts.loading { opacity: 0.45; }
   .status { color: var(--muted); font-size: 13px; }
   .status.offline { color: var(--bad); }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
@@ -43,6 +56,7 @@
   .chart .head .name { font-weight: 600; }
   .chart .head .range { color: var(--muted); font-variant-numeric: tabular-nums; }
   .chart svg { display: block; width: 100%; height: 150px; }
+  .chart svg.zoom { cursor: zoom-in; }
   .chart svg text { fill: var(--muted); font-size: 11px; }
   .chart .empty { color: var(--muted); font-size: 13px; padding: 60px 0; text-align: center; }
   .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
@@ -52,6 +66,7 @@
   }
   .seg button + button { border-left: 1px solid var(--border); }
   .seg button.on { background: var(--line); color: #fff; }
+  .seg button:disabled { color: var(--muted); opacity: 0.5; cursor: default; }
   footer { color: var(--muted); font-size: 12px; margin: 28px 0 8px; }
 </style>
 </head>
@@ -72,10 +87,16 @@
         data-range="7d">Week</button><button data-range="30d">Month</button><button
         data-range="90d">3 Months</button>
     </span>
+    <span class="seg" id="nav">
+      <button id="back" title="Earlier">←</button><button id="fwd" title="Later" disabled>→</button><button
+        id="live" title="Back to now" disabled>Now</button>
+    </span>
+    <span class="when" id="when"></span>
+    <span class="busy" id="busy" role="status"><span class="spin"></span><span id="busy-text"></span></span>
   </h2>
   <div class="charts" id="charts"></div>
 
-  <footer>The last 24 hours are kept in 1-minute detail (restored from the SD card after a restart; without a card, earlier hours come from the hourly log). Week and longer show hourly averages (3-hour for 3 Months), with pollutant peaks as the fainter line; they're kept for about 4 months. Times are in your browser's time zone.</footer>
+  <footer>The last 24 hours are kept in 1-minute detail (restored from the SD card after a restart; without a card, earlier hours come from the hourly log). Week and longer show hourly averages (3-hour for 3 Months), with pollutant peaks as the fainter line; they're kept for about 4 months. Click a chart to zoom in to the next shorter range around that moment; ← and → step back and forth by half the range, and Now returns to the present. More than a day back, 1-minute detail comes from the SD card's log (hourly without a card). Times are in your browser's time zone.</footer>
 </main>
 
 <script>
@@ -175,6 +196,7 @@ function timeLabel(t, spanS) {
 }
 
 let pendingDraws = [];
+let clipCount = 0;
 
 // pts: [[t (unix s), v (display units) or null], ...]; gap: max seconds between joined points
 // peaks (optional): a second series, e.g. each hour's highest reading, drawn
@@ -183,15 +205,20 @@ function drawChart(container, m, pts, x0, x1, gap, peaks) {
   const card = el("div", "chart");
   const head = el("div", "head");
   head.append(el("span", "name", m.name + " (" + m.unit() + ")"));
-  const range = el("span", "range");
-  head.append(range);
+  const minMax = el("span", "range");
+  head.append(minMax);
   card.append(head);
   container.append(card);
 
-  // Only what's inside the time window counts (and gets drawn).
-  const inWindow = p => p[0] >= x0 && p[0] <= x1;
-  pts = pts.filter(inWindow);
-  peaks = (peaks || []).filter(inWindow);
+  // Only what's inside the time window counts, plus the nearest point just
+  // outside each edge (if close enough to be joined), so lines run to the
+  // edges: a 1-hour window over hourly data may have no point inside at all.
+  // Series are oldest first.
+  const inWindow = (series, g) => series.filter((p, i) => (p[0] >= x0 && p[0] <= x1) ||
+    (p[0] < x0 && x0 - p[0] <= g && (i + 1 >= series.length || series[i + 1][0] >= x0)) ||
+    (p[0] > x1 && p[0] - x1 <= g && (i === 0 || series[i - 1][0] <= x1)));
+  pts = inWindow(pts, gap);
+  peaks = inWindow(peaks || [], 3600 * 1.5);
   const vals = pts.filter(p => p[1] !== null);
   const peakVals = peaks.filter(p => p[1] !== null);
   if (vals.length === 0) {
@@ -218,8 +245,11 @@ function drawChart(container, m, pts, x0, x1, gap, peaks) {
   if (m.min0 && lo < 0) { hi -= lo; lo = 0; }   // e.g. PM2.5 can't go below 0
 
   const vmin = Math.min(...vals.map(p => p[1])), vmax = Math.max(...vals.map(p => p[1]));
-  range.textContent = "min " + fmt(m, vmin) + " · max " + fmt(m, vmax) +
+  minMax.textContent = "min " + fmt(m, vmin) + " · max " + fmt(m, vmax) +
     (peakVals.length ? " · peak " + fmt(m, Math.max(...peakVals.map(p => p[1]))) : "");
+
+  const shown = range;   // the range this chart is drawn for, to zoom in from
+  const clipId = "clip" + (++clipCount);
 
   // Measured and drawn once all cards exist (see renderCharts), so every card
   // has its final width; drawing while the grid still had one card made the
@@ -229,6 +259,10 @@ function drawChart(container, m, pts, x0, x1, gap, peaks) {
     const sx = t => L + (t - x0) / (x1 - x0) * (W - L - R);
     const sy = v => T + (1 - (ty(v) - lo) / (hi - lo)) * (H - T - B);
     const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none" });
+    // Lines are clipped to the plot area (the points just outside the window).
+    const clip = svgEl("clipPath", { id: clipId });
+    clip.append(svgEl("rect", { x: L, y: 0, width: W - L - R, height: H }));
+    svg.append(clip);
 
     // y grid + labels (3 lines)
     for (let i = 0; i <= 2; i++) {
@@ -266,19 +300,31 @@ function drawChart(container, m, pts, x0, x1, gap, peaks) {
     if (peakVals.length) {
       // Peaks are hourly whatever the main line's detail, so join them an hour apart.
       svg.append(svgEl("path", { d: path(peaks, 3600 * 1.5), fill: "none", stroke: "var(--line)",
+        "clip-path": `url(#${clipId})`,
         "stroke-width": 1.5, "stroke-opacity": 0.4, "stroke-linejoin": "round",
         "stroke-linecap": "round", "vector-effect": "non-scaling-stroke" }));
     }
     svg.append(svgEl("path", { d: path(pts, gap), fill: "none", stroke: "var(--line)", "stroke-width": 2,
+      "clip-path": `url(#${clipId})`,
       "stroke-linejoin": "round", "stroke-linecap": "round", "vector-effect": "non-scaling-stroke" }));
     // a triangle where a line goes off the top of the chart
-    for (const x of new Set(marks.map(x => Math.round(x)))) {
+    for (const x of new Set(marks.map(x => Math.round(x)).filter(x => x >= L && x <= W - R))) {
       svg.append(svgEl("path", { d: `M${x - 4},${T + 7}L${x},${T - 1}L${x + 4},${T + 7}Z`,
         fill: "var(--line)" }));
     }
     // single points (e.g. one hour of history) still show up
     if (vals.length === 1) {
-      svg.append(svgEl("circle", { cx: sx(vals[0][0]), cy: yOf(vals[0][1]), r: 3, fill: "var(--line)" }));
+      svg.append(svgEl("circle", { cx: sx(vals[0][0]), cy: yOf(vals[0][1]), r: 3, fill: "var(--line)",
+        "clip-path": `url(#${clipId})` }));
+    }
+    // Click to zoom in to the next shorter range, centred on that moment.
+    if (ORDER.indexOf(shown) > 0) {
+      svg.classList.add("zoom");
+      svg.addEventListener("click", ev => {
+        const r = svg.getBoundingClientRect();
+        const f = ((ev.clientX - r.left) / r.width * W - L) / (W - L - R);
+        zoomAt(x0 + Math.min(Math.max(f, 0), 1) * (x1 - x0), shown);
+      });
     }
     card.append(svg);
   });
@@ -302,7 +348,10 @@ const RANGES = {
   "30d": { days: 30, refresh: 600 },
   "90d": { days: 90, group: 3, refresh: 600 },   // hourly rows averaged in threes
 };
+const ORDER = Object.keys(RANGES);   // shortest first
+const spanOf = cfg => cfg.span || cfg.days * 86400;
 let range = "4h";
+let viewEnd = null;      // the end of the window shown (unix s), or null for now
 let lastData = null;     // what renderCharts() last drew, for redraw on resize
 let lastFetch = 0;
 
@@ -323,6 +372,32 @@ function rowValue(d, r, key) {
   return col < 0 || r[col] === null || r[col] === undefined ? null : r[col];
 }
 
+// The SD card's minute log (/api/minutes, CSV) as [{t, v: {key: value}}],
+// oldest first. Columns are found by name in each file's header row; lines
+// with the wrong number of fields (torn by a power cut) are skipped.
+const CSV_COL = { temp: "temp_c", ah: "ah_g_m3", press: "press_hpa", pm25: "pm25",
+  co2: "co2_ppm", tvoc: "tvoc_ppb", pc03: "pc03_per_l", lux: "lux", batt_ma: "batt_ma" };
+
+function parseMinutes(text) {
+  const out = [];
+  let cols = null;
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    const f = line.split(",");
+    if (f[0] === "time") { cols = f; continue; }
+    if (!cols || f.length !== cols.length) continue;
+    const t = Date.parse(f[0]) / 1000;
+    if (!isFinite(t)) continue;
+    const v = {};
+    for (const key in CSV_COL) {
+      const i = cols.indexOf(CSV_COL[key]);
+      v[key] = i < 0 || f[i] === "" ? null : parseFloat(f[i]);
+    }
+    out.push({ t, v });
+  }
+  return out;
+}
+
 // Hourly rows, last record per hour (a re-written hour supersedes), oldest first.
 function hourlyRows(d) {
   const byT = new Map();
@@ -332,17 +407,21 @@ function hourlyRows(d) {
 
 // Live (RAM) data. It only goes back d.covered seconds: to the last boot, or
 // further if the device restored it from its SD card (before that it's a flat
-// placeholder), so the part of the window before that comes from the hourly log.
+// placeholder), so the part of the window before that comes from the SD card's
+// minute log, and the hourly log for any hour with no minutes.
 // The pollutants' peak line comes from the hourly log throughout (1-minute
 // averages smooth the peaks away), ending with the hour so far.
-function liveCharts(box, cfg, d, early) {
-  const end = d.t || nowS();
+function liveCharts(box, cfg, d, early, minutes) {
+  const end = d.t || nowS();     // the device's now
+  const x1 = viewEnd ?? end;     // the window's end
   const boot = end - (d.covered ?? d.uptime);
   // The newest point is the last completed bucket, which ended d.age s ago;
   // each point is plotted at the middle of its bucket.
   const last = end - (d.age || 0) - d.period / 2;
   const allRows = early ? hourlyRows(early) : [];
-  const rows = allRows.filter(r => r[0] + 3600 <= boot);
+  const minuteRows = (minutes || []).filter(r => r.t + 60 <= boot);
+  const minuteHours = new Set(minuteRows.map(r => r.t - r.t % 3600));
+  const rows = allRows.filter(r => r[0] + 3600 <= boot && !minuteHours.has(r[0]));
   // Peak rows, each at the middle of its hour (of the part so far, for the
   // current one).
   const peakRows = allRows.map(r => [r[0] + 1800, r]);
@@ -355,16 +434,20 @@ function liveCharts(box, cfg, d, early) {
     const n = arr.length;
     const live = arr.map((v, i) => [last - (n - 1 - i) * d.period, v === null ? null : m.conv(v)])
                     .filter(p => p[0] - d.period / 2 >= boot);
-    // Each hourly average is plotted at the middle of its hour.
+    // Each hourly average is plotted at the middle of its hour, each minute
+    // at the middle of its minute.
     const hourly = rows.map(r => { const v = rowValue(early, r, m.key);
                                    return [r[0] + 1800, v === null ? null : m.conv(v)]; });
+    const mins = minuteRows.map(r => [r.t + 30, r.v[m.key] === null ? null : m.conv(r.v[m.key])]);
     const peaks = !m.peak ? null : peakRows.map(([t, r]) => {
       const v = rowValue(early, r, m.peak);
       return [t, v === null ? null : m.conv(v)];
     });
-    // Join hourly points to each other and to the live data; break on real gaps.
-    const gap = hourly.length ? 3600 * 1.5 : d.period * 1.5;
-    drawChart(box, m, hourly.concat(live), end - cfg.span, end, gap, peaks);
+    // Join hourly points to each other and to the rest; break on real gaps.
+    const gap = hourly.length ? 3600 * 1.5 : mins.length ? Math.max(d.period, 60) * 1.5
+                                                         : d.period * 1.5;
+    const series = hourly.concat(mins).sort((a, b) => a[0] - b[0]).concat(live);
+    drawChart(box, m, series, x1 - cfg.span, x1, gap, peaks);
   }
 }
 
@@ -388,7 +471,7 @@ function hourlySeries(d, rows, m, group) {
 
 function hourlyCharts(box, cfg, d) {
   const rows = hourlyRows(d);
-  const end = nowS();
+  const end = viewEnd ?? nowS();
   const start = end - cfg.days * 86400;
   const group = cfg.group || 1;
   for (const m of METRICS) {
@@ -400,7 +483,7 @@ function hourlyCharts(box, cfg, d) {
 }
 
 function renderCharts() {
-  if (!lastData || lastData.range !== range) return;
+  if (!lastData || lastData.range !== range || lastData.end !== viewEnd) return;
   const box = document.getElementById("charts");
   // Hold the current height while rebuilding: the cards are measured as they're
   // added, and a briefly shorter page would make phones jump the scroll position.
@@ -408,7 +491,7 @@ function renderCharts() {
   box.replaceChildren();
   const cfg = RANGES[range];
   pendingDraws = [];
-  if (cfg.live) liveCharts(box, cfg, lastData.live, lastData.early);
+  if (cfg.live) liveCharts(box, cfg, lastData.live, lastData.early, lastData.minutes);
   else hourlyCharts(box, cfg, lastData.hourly);
   for (const draw of pendingDraws) draw();
   pendingDraws = [];
@@ -419,6 +502,12 @@ async function getJSON(path) {
   const r = await fetch(path, { cache: "no-store" });
   if (!r.ok) throw new Error(path + ": " + r.status);
   return r.json();
+}
+
+async function getText(path) {
+  const r = await fetch(path, { cache: "no-store" });
+  if (!r.ok) throw new Error(path + ": " + r.status);
+  return r.text();
 }
 
 function setStatus(text, offline) {
@@ -441,36 +530,146 @@ async function pollNow() {
   }
 }
 
-async function pollCharts() {
-  const want = range;
+// Loading feedback for a view the user asked for (and the first one): the
+// old charts dim at once, and "Loading…" shows if it takes over BUSY_DELAY ms
+// (so quick loads don't flicker). Background refreshes stay quiet.
+const BUSY_DELAY = 150, RETRY_MS = 5000;
+let loadSeq = 0;           // the newest pollCharts() call
+let loading = false;       // a fetch is under way
+let busyTimer, retryTimer;
+
+function showBusy(text, failed) {
+  const b = document.getElementById("busy");
+  document.getElementById("busy-text").textContent = text || "";
+  b.classList.toggle("on", !!text);
+  b.classList.toggle("failed", !!failed);
+}
+
+async function pollCharts(user) {
+  const seq = ++loadSeq;
+  const box = document.getElementById("charts");
+  clearTimeout(retryTimer);
+  if (user) {
+    box.classList.add("loading");
+    clearTimeout(busyTimer);
+    busyTimer = setTimeout(() => { if (seq === loadSeq) showBusy("Loading…"); }, BUSY_DELAY);
+  }
+  loading = true;
+  let ok = false;
+  const want = range, wantEnd = viewEnd;
   const cfg = RANGES[want];
+  const now = nowS();
+  const start = (wantEnd ?? now) - spanOf(cfg);
   try {
     let data;
     if (cfg.live) {
-      const live = await getJSON("/api/recent" +
-        "?points=" + cfg.points + (cfg.live === "short" ? "&window=short" : ""));
-      // Hourly data, for the peaks and to cover the time before the last boot.
-      const early = cfg.live === "long"
-        ? await getJSON("/api/history?since=" + Math.floor(nowS() - cfg.span - 3600)) : null;
-      data = { range: want, live, early };
+      // A window in the past needs enough points to reach back to its start.
+      // The 10-second history only goes back 15 minutes; before that, 1-minute.
+      const short = cfg.live === "short" && start >= now - 880;
+      // (A window over a day back only needs the RAM history's covered and t.)
+      const points = wantEnd === null ? cfg.points : wantEnd < now - 86400 ? 2
+        : Math.min(short ? 90 : 1440, Math.ceil((now - start) / (short ? 10 : 60)) + 2);
+      const live = await getJSON("/api/recent?points=" + points + (short ? "&window=short" : ""));
+      // Hourly data, for the peaks and for any hour the minute log lacks.
+      const early = short ? null : await getJSON("/api/history?since=" + Math.floor(start - 3600));
+      // The SD card's minute log, for the part of the window before the RAM
+      // history (before the last boot, or more than a day back).
+      let minutes = null;
+      if (!short) {
+        const covered = (live.t || now) - (live.covered ?? live.uptime);
+        const until = Math.min(wantEnd ?? now, covered);
+        if (start < until) {
+          try {
+            minutes = parseMinutes(await getText("/api/minutes?since=" + Math.floor(start - 60) +
+                                                 "&until=" + Math.ceil(until)));
+          } catch (e) {}    // no card, or an older firmware: hourly it is
+        }
+      }
+      data = { live, early, minutes };
     } else {
-      const since = Math.floor(nowS() - cfg.days * 86400);
-      data = { range: want, hourly: await getJSON("/api/history?since=" + since) };
+      const since = Math.floor(start - 3600 * (cfg.group || 1));
+      data = { hourly: await getJSON("/api/history?since=" + since) };
     }
-    if (want !== range) return;      // the user switched while this was loading
+    // The user switched range or moved while this was loading.
+    if (want !== range || wantEnd !== viewEnd) return;
+    data.range = want;
+    data.end = wantEnd;
     lastData = data;
     lastFetch = nowS();
     renderCharts();
-  } catch (e) {}
+    ok = true;
+  } catch (e) {
+    // Say so, and try again (a background refresh just waits for the next).
+    if (seq === loadSeq && (user || box.classList.contains("loading"))) {
+      clearTimeout(busyTimer);
+      showBusy("Couldn't load — retrying", true);
+      retryTimer = setTimeout(() => { if (seq === loadSeq) pollCharts(true); }, RETRY_MS);
+    }
+  } finally {
+    // Only the newest call settles the indicator: an older one finishing
+    // late (the user moved on) mustn't clear the newer one's.
+    if (seq === loadSeq) {
+      loading = false;
+      if (ok) {
+        clearTimeout(busyTimer);
+        box.classList.remove("loading");
+        showBusy("");
+      }
+    }
+  }
 }
 
+// The window shown: range r ending at `end` (null, or anything from now on: live).
+function setView(r, end) {
+  range = r;
+  viewEnd = end === null || end >= nowS() - 1 ? null : end;
+  for (const b of document.querySelectorAll("#ranges button")) {
+    b.classList.toggle("on", b.dataset.range === r);
+  }
+  document.getElementById("fwd").disabled = viewEnd === null;
+  document.getElementById("live").disabled = viewEnd === null;
+  showWhen();
+  pollCharts(true);
+}
+
+// The dates (and times) of a window in the past; nothing when live.
+function showWhen() {
+  const w = document.getElementById("when");
+  if (viewEnd === null) { w.textContent = ""; return; }
+  const span = spanOf(RANGES[range]);
+  const a = new Date((viewEnd - span) * 1000), b = new Date(viewEnd * 1000);
+  const day = { month: "short", day: "numeric" }, hm = { hour: "numeric", minute: "2-digit" };
+  if (span > 2 * 86400) {
+    w.textContent = a.toLocaleDateString([], day) + " – " + b.toLocaleDateString([], day);
+  } else {
+    w.textContent = a.toLocaleString([], { ...day, ...hm }) + " – " +
+      (a.toDateString() === b.toDateString() ? b.toLocaleTimeString([], hm)
+                                             : b.toLocaleString([], { ...day, ...hm }));
+  }
+}
+
+// Zoom from range `from` to the next shorter one, centred on time t.
+function zoomAt(t, from) {
+  const i = ORDER.indexOf(from);
+  if (i <= 0) return;
+  const r = ORDER[i - 1];
+  setView(r, t + spanOf(RANGES[r]) / 2);
+}
+
+// A range button keeps the window's centre when looking at the past.
 document.getElementById("ranges").addEventListener("click", ev => {
   const b = ev.target.closest("button");
   if (!b) return;
-  range = b.dataset.range;
-  for (const x of document.querySelectorAll("#ranges button")) x.classList.toggle("on", x === b);
-  pollCharts();
+  const r = b.dataset.range;
+  const centre = viewEnd === null ? null : viewEnd - spanOf(RANGES[range]) / 2;
+  setView(r, centre === null ? null : centre + spanOf(RANGES[r]) / 2);
 });
+// Step by half the range, so each view overlaps the last.
+document.getElementById("back").addEventListener("click", () =>
+  setView(range, (viewEnd ?? nowS()) - spanOf(RANGES[range]) / 2));
+document.getElementById("fwd").addEventListener("click", () =>
+  setView(range, viewEnd + spanOf(RANGES[range]) / 2));
+document.getElementById("live").addEventListener("click", () => setView(range, null));
 
 // Redraw at the new width when the window is resized.
 let resizeTimer;
@@ -481,11 +680,12 @@ window.addEventListener("resize", () => {
 
 (async () => {
   await pollNow();          // learn the units first
-  pollCharts();
+  pollCharts(true);
   setInterval(pollNow, 5000);
-  // Refresh the charts as often as the selected range calls for.
+  // Refresh the charts as often as the selected range calls for (not when
+  // looking at the past).
   setInterval(() => {
-    if (nowS() - lastFetch >= RANGES[range].refresh) pollCharts();
+    if (viewEnd === null && !loading && nowS() - lastFetch >= RANGES[range].refresh) pollCharts();
   }, 5000);
 })();
 </script>
