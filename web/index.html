@@ -83,7 +83,7 @@
   </h2>
   <div class="charts" id="charts"></div>
 
-  <footer>The last 24 hours are kept in 1-minute detail (restored from the SD card after a restart; without a card, earlier hours come from the hourly log). Week and longer show hourly averages (3-hour for 3 Months), with pollutant peaks as the fainter line; they're kept for about 4 months. Click a chart to zoom in to the next shorter range around that moment; ← and → step back and forth by half the range, and Now returns to the present (more than a day back, only hourly detail is kept). Times are in your browser's time zone.</footer>
+  <footer>The last 24 hours are kept in 1-minute detail (restored from the SD card after a restart; without a card, earlier hours come from the hourly log). Week and longer show hourly averages (3-hour for 3 Months), with pollutant peaks as the fainter line; they're kept for about 4 months. Click a chart to zoom in to the next shorter range around that moment; ← and → step back and forth by half the range, and Now returns to the present. More than a day back, 1-minute detail comes from the SD card's log (hourly without a card). Times are in your browser's time zone.</footer>
 </main>
 
 <script>
@@ -359,6 +359,32 @@ function rowValue(d, r, key) {
   return col < 0 || r[col] === null || r[col] === undefined ? null : r[col];
 }
 
+// The SD card's minute log (/api/minutes, CSV) as [{t, v: {key: value}}],
+// oldest first. Columns are found by name in each file's header row; lines
+// with the wrong number of fields (torn by a power cut) are skipped.
+const CSV_COL = { temp: "temp_c", ah: "ah_g_m3", press: "press_hpa", pm25: "pm25",
+  co2: "co2_ppm", tvoc: "tvoc_ppb", pc03: "pc03_per_l", lux: "lux", batt_ma: "batt_ma" };
+
+function parseMinutes(text) {
+  const out = [];
+  let cols = null;
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    const f = line.split(",");
+    if (f[0] === "time") { cols = f; continue; }
+    if (!cols || f.length !== cols.length) continue;
+    const t = Date.parse(f[0]) / 1000;
+    if (!isFinite(t)) continue;
+    const v = {};
+    for (const key in CSV_COL) {
+      const i = cols.indexOf(CSV_COL[key]);
+      v[key] = i < 0 || f[i] === "" ? null : parseFloat(f[i]);
+    }
+    out.push({ t, v });
+  }
+  return out;
+}
+
 // Hourly rows, last record per hour (a re-written hour supersedes), oldest first.
 function hourlyRows(d) {
   const byT = new Map();
@@ -368,10 +394,11 @@ function hourlyRows(d) {
 
 // Live (RAM) data. It only goes back d.covered seconds: to the last boot, or
 // further if the device restored it from its SD card (before that it's a flat
-// placeholder), so the part of the window before that comes from the hourly log.
+// placeholder), so the part of the window before that comes from the SD card's
+// minute log, and the hourly log for any hour with no minutes.
 // The pollutants' peak line comes from the hourly log throughout (1-minute
 // averages smooth the peaks away), ending with the hour so far.
-function liveCharts(box, cfg, d, early) {
+function liveCharts(box, cfg, d, early, minutes) {
   const end = d.t || nowS();     // the device's now
   const x1 = viewEnd ?? end;     // the window's end
   const boot = end - (d.covered ?? d.uptime);
@@ -379,7 +406,9 @@ function liveCharts(box, cfg, d, early) {
   // each point is plotted at the middle of its bucket.
   const last = end - (d.age || 0) - d.period / 2;
   const allRows = early ? hourlyRows(early) : [];
-  const rows = allRows.filter(r => r[0] + 3600 <= boot);
+  const minuteRows = (minutes || []).filter(r => r.t + 60 <= boot);
+  const minuteHours = new Set(minuteRows.map(r => r.t - r.t % 3600));
+  const rows = allRows.filter(r => r[0] + 3600 <= boot && !minuteHours.has(r[0]));
   // Peak rows, each at the middle of its hour (of the part so far, for the
   // current one).
   const peakRows = allRows.map(r => [r[0] + 1800, r]);
@@ -392,16 +421,20 @@ function liveCharts(box, cfg, d, early) {
     const n = arr.length;
     const live = arr.map((v, i) => [last - (n - 1 - i) * d.period, v === null ? null : m.conv(v)])
                     .filter(p => p[0] - d.period / 2 >= boot);
-    // Each hourly average is plotted at the middle of its hour.
+    // Each hourly average is plotted at the middle of its hour, each minute
+    // at the middle of its minute.
     const hourly = rows.map(r => { const v = rowValue(early, r, m.key);
                                    return [r[0] + 1800, v === null ? null : m.conv(v)]; });
+    const mins = minuteRows.map(r => [r.t + 30, r.v[m.key] === null ? null : m.conv(r.v[m.key])]);
     const peaks = !m.peak ? null : peakRows.map(([t, r]) => {
       const v = rowValue(early, r, m.peak);
       return [t, v === null ? null : m.conv(v)];
     });
-    // Join hourly points to each other and to the live data; break on real gaps.
-    const gap = hourly.length ? 3600 * 1.5 : d.period * 1.5;
-    drawChart(box, m, hourly.concat(live), x1 - cfg.span, x1, gap, peaks);
+    // Join hourly points to each other and to the rest; break on real gaps.
+    const gap = hourly.length ? 3600 * 1.5 : mins.length ? Math.max(d.period, 60) * 1.5
+                                                         : d.period * 1.5;
+    const series = hourly.concat(mins).sort((a, b) => a[0] - b[0]).concat(live);
+    drawChart(box, m, series, x1 - cfg.span, x1, gap, peaks);
   }
 }
 
@@ -445,7 +478,7 @@ function renderCharts() {
   box.replaceChildren();
   const cfg = RANGES[range];
   pendingDraws = [];
-  if (cfg.live) liveCharts(box, cfg, lastData.live, lastData.early);
+  if (cfg.live) liveCharts(box, cfg, lastData.live, lastData.early, lastData.minutes);
   else hourlyCharts(box, cfg, lastData.hourly);
   for (const draw of pendingDraws) draw();
   pendingDraws = [];
@@ -456,6 +489,12 @@ async function getJSON(path) {
   const r = await fetch(path, { cache: "no-store" });
   if (!r.ok) throw new Error(path + ": " + r.status);
   return r.json();
+}
+
+async function getText(path) {
+  const r = await fetch(path, { cache: "no-store" });
+  if (!r.ok) throw new Error(path + ": " + r.status);
+  return r.text();
 }
 
 function setStatus(text, offline) {
@@ -489,13 +528,26 @@ async function pollCharts() {
       // A window in the past needs enough points to reach back to its start.
       // The 10-second history only goes back 15 minutes; before that, 1-minute.
       const short = cfg.live === "short" && start >= now - 880;
-      const points = wantEnd === null ? cfg.points
+      // (A window over a day back only needs the RAM history's covered and t.)
+      const points = wantEnd === null ? cfg.points : wantEnd < now - 86400 ? 2
         : Math.min(short ? 90 : 1440, Math.ceil((now - start) / (short ? 10 : 60)) + 2);
       const live = await getJSON("/api/recent?points=" + points + (short ? "&window=short" : ""));
-      // Hourly data, for the peaks and to cover the time before the last boot
-      // (or more than a day back).
+      // Hourly data, for the peaks and for any hour the minute log lacks.
       const early = short ? null : await getJSON("/api/history?since=" + Math.floor(start - 3600));
-      data = { live, early };
+      // The SD card's minute log, for the part of the window before the RAM
+      // history (before the last boot, or more than a day back).
+      let minutes = null;
+      if (!short) {
+        const covered = (live.t || now) - (live.covered ?? live.uptime);
+        const until = Math.min(wantEnd ?? now, covered);
+        if (start < until) {
+          try {
+            minutes = parseMinutes(await getText("/api/minutes?since=" + Math.floor(start - 60) +
+                                                 "&until=" + Math.ceil(until)));
+          } catch (e) {}    // no card, or an older firmware: hourly it is
+        }
+      }
+      data = { live, early, minutes };
     } else {
       const since = Math.floor(start - 3600 * (cfg.group || 1));
       data = { hourly: await getJSON("/api/history?since=" + since) };
