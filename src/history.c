@@ -17,7 +17,10 @@
  * line across the full width instead of an almost-empty strip. Real data
  * then scrolls in from the right. (This is invented data, chosen because a
  * flat "no change yet" line reads better than a mostly blank one; the web
- * page drops it using the uptime.)
+ * page drops it using the uptime.) Once anything is restored from the SD card
+ * (history_restore), the backfill before boot is cleared and never added
+ * again, whichever comes first: a series whose first reading comes after the
+ * restore (the particle sensor warms up for a while) must not paint over it.
  *
  * history_add runs on the sensor loop; the getters also run from the
  * button handler (chart pages) and the web server, so all take `lock`.
@@ -88,6 +91,10 @@ struct window {
 	bool seeded[H_COUNT];
 	/* Uptime (ms, <= 0) of the oldest restored data; 0 if none. */
 	int64_t oldest_ms;
+	/* seq when the window opened: buckets before it are from before boot. */
+	uint32_t open_seq;
+	/* Something was restored: no backfill (the rest before boot is a gap). */
+	bool restored;
 };
 
 static uint16_t long_buckets[HISTORY_LEN][H_COUNT];
@@ -126,10 +133,12 @@ static void add(struct window *w, enum history_series s, bool ok, double v)
 		return;
 	}
 	if (!w->seeded[s]) {
-		uint16_t c = encode(s, v);
+		if (!w->restored) {
+			uint16_t c = encode(s, v);
 
-		for (int i = 0; i < w->len; i++) {
-			w->buckets[i][s] = c;
+			for (int i = 0; i < w->len; i++) {
+				w->buckets[i][s] = c;
+			}
 		}
 		w->seeded[s] = true;
 	}
@@ -147,6 +156,7 @@ static void window_add(struct window *w, const struct readings *r, int64_t now)
 			}
 		}
 		w->seq = w->len;
+		w->open_seq = w->seq;
 		w->open = true;
 		w->start_ms = now;
 	} else {
@@ -239,6 +249,18 @@ static void restore_at(struct window *w, int64_t t_ms, const float *v)
 
 	if (back >= w->len) {
 		return;		/* older than the window */
+	}
+
+	if (!w->restored) {
+		/* The first restore: drop the backfill before boot (all series). */
+		uint32_t from = w->seq > (uint32_t)w->len ? w->seq - w->len : 0;
+
+		for (uint32_t k = from; k < w->open_seq; k++) {
+			for (int s = 0; s < H_COUNT; s++) {
+				w->buckets[k % w->len][s] = NONE;
+			}
+		}
+		w->restored = true;
 	}
 
 	uint16_t *b = w->buckets[(w->seq - 1 - back) % w->len];

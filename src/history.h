@@ -11,8 +11,8 @@
  *  - HW_SHORT: 15 minutes of 10-second buckets, for the tiles' trend lines.
  *
  * Values are returned in the same metric units as struct readings. Lost on
- * reboot; at boot each series is backfilled with its first reading (see
- * history.c).
+ * reboot; at boot each series is backfilled with its first reading, unless
+ * history is restored from the SD card (see history.c).
  */
 
 #ifndef SENSOR_BOX_HISTORY_H_
