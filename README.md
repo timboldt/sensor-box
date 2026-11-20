@@ -128,9 +128,9 @@ can also be used directly (values are metric; missing values are `null`):
 | Endpoint | Contents |
 |----------|----------|
 | `/api/now` | Current readings |
-| `/api/recent` | Last 24 hours, 1-minute averages, oldest first (`?points=N` for the last N; `?window=short`: last 15 minutes, 10 s); includes `covered`, how many seconds back the real data goes (the uptime, or more if restored from the SD card; older points are a placeholder), and `age`, how long ago the newest point ended |
+| `/api/recent` | Last 24 hours, 1-minute averages, oldest first (`?points=N` for the last N; `&group=G` averages every G into one point; `?window=short`: last 15 minutes, 10 s); includes `covered`, how many seconds back the real data goes (the uptime, or more if restored from the SD card; older points are a placeholder), and `age`, how long ago the newest point ended |
 | `/api/history?since=<unix time>` | Hourly averages and peaks from flash, plus the hour so far (`current`) |
-| `/api/minutes?since=<unix time>&until=<unix time>` | The SD card's minute log for that span (at most 2 days), as CSV straight from the card, each day's file after its own header row; empty without a card |
+| `/api/minutes?since=<unix time>&until=<unix time>` | The SD card's minute log for that span (at most 2 days), as CSV straight from the card, each day's file after its own header row; empty without a card. `&step=S` (S dividing 1440) sends S-minute averages of the charted columns instead |
 
 ## Wi-Fi
 
