@@ -27,6 +27,18 @@
   h1 { font-size: 22px; margin: 0; }
   h2 { font-size: 16px; margin: 28px 0 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
   .when { color: var(--muted); font-size: 13px; font-weight: 400; font-variant-numeric: tabular-nums; }
+  .busy { display: none; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; font-weight: 400; }
+  .busy.on { display: inline-flex; }
+  .busy.failed { color: var(--bad); }
+  .spin {
+    width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--grid);
+    border-top-color: var(--line); animation: spin 0.8s linear infinite;
+  }
+  .busy.failed .spin { display: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2.4s; } }
+  .charts { transition: opacity 0.15s; }
+  .charts.loading { opacity: 0.45; }
   .status { color: var(--muted); font-size: 13px; }
   .status.offline { color: var(--bad); }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
@@ -80,6 +92,7 @@
         id="live" title="Back to now" disabled>Now</button>
     </span>
     <span class="when" id="when"></span>
+    <span class="busy" id="busy" role="status"><span class="spin"></span><span id="busy-text"></span></span>
   </h2>
   <div class="charts" id="charts"></div>
 
@@ -517,7 +530,32 @@ async function pollNow() {
   }
 }
 
-async function pollCharts() {
+// Loading feedback for a view the user asked for (and the first one): the
+// old charts dim at once, and "Loading…" shows if it takes over BUSY_DELAY ms
+// (so quick loads don't flicker). Background refreshes stay quiet.
+const BUSY_DELAY = 150, RETRY_MS = 5000;
+let loadSeq = 0;           // the newest pollCharts() call
+let loading = false;       // a fetch is under way
+let busyTimer, retryTimer;
+
+function showBusy(text, failed) {
+  const b = document.getElementById("busy");
+  document.getElementById("busy-text").textContent = text || "";
+  b.classList.toggle("on", !!text);
+  b.classList.toggle("failed", !!failed);
+}
+
+async function pollCharts(user) {
+  const seq = ++loadSeq;
+  const box = document.getElementById("charts");
+  clearTimeout(retryTimer);
+  if (user) {
+    box.classList.add("loading");
+    clearTimeout(busyTimer);
+    busyTimer = setTimeout(() => { if (seq === loadSeq) showBusy("Loading…"); }, BUSY_DELAY);
+  }
+  loading = true;
+  let ok = false;
   const want = range, wantEnd = viewEnd;
   const cfg = RANGES[want];
   const now = nowS();
@@ -559,7 +597,26 @@ async function pollCharts() {
     lastData = data;
     lastFetch = nowS();
     renderCharts();
-  } catch (e) {}
+    ok = true;
+  } catch (e) {
+    // Say so, and try again (a background refresh just waits for the next).
+    if (seq === loadSeq && (user || box.classList.contains("loading"))) {
+      clearTimeout(busyTimer);
+      showBusy("Couldn't load — retrying", true);
+      retryTimer = setTimeout(() => { if (seq === loadSeq) pollCharts(true); }, RETRY_MS);
+    }
+  } finally {
+    // Only the newest call settles the indicator: an older one finishing
+    // late (the user moved on) mustn't clear the newer one's.
+    if (seq === loadSeq) {
+      loading = false;
+      if (ok) {
+        clearTimeout(busyTimer);
+        box.classList.remove("loading");
+        showBusy("");
+      }
+    }
+  }
 }
 
 // The window shown: range r ending at `end` (null, or anything from now on: live).
@@ -572,7 +629,7 @@ function setView(r, end) {
   document.getElementById("fwd").disabled = viewEnd === null;
   document.getElementById("live").disabled = viewEnd === null;
   showWhen();
-  pollCharts();
+  pollCharts(true);
 }
 
 // The dates (and times) of a window in the past; nothing when live.
@@ -623,12 +680,12 @@ window.addEventListener("resize", () => {
 
 (async () => {
   await pollNow();          // learn the units first
-  pollCharts();
+  pollCharts(true);
   setInterval(pollNow, 5000);
   // Refresh the charts as often as the selected range calls for (not when
   // looking at the past).
   setInterval(() => {
-    if (viewEnd === null && nowS() - lastFetch >= RANGES[range].refresh) pollCharts();
+    if (viewEnd === null && !loading && nowS() - lastFetch >= RANGES[range].refresh) pollCharts();
   }, 5000);
 })();
 </script>
