@@ -15,8 +15,9 @@ void light_init(void);
 
 /*
  * Read the light level in lux. Returns false if there's no valid reading
- * (sensor missing, I2C error, or still settling after a gain change).
- * Adjusts the gain for the next reading as needed.
+ * (sensor missing, I2C error, clipped, or within ~0.5 s of a gain change).
+ * Adjusts the gain for the next reading as needed. Meant to be called about
+ * once a second, so a gain change never costs a reading.
  */
 bool light_read(double *lux);
 

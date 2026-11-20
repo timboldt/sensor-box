@@ -173,19 +173,31 @@ static void report_bme280(struct readings *r)
 	feed_scd4x_pressure(press_hpa);
 }
 
+/*
+ * The light sensor is read every tick (second), not just every report, so
+ * the backlight follows the room quickly. Auto-gain and the lux formula live
+ * in light.c.
+ */
+static bool light_ok;
+static double light_lux;
+
+static void poll_light(void)
+{
+	light_ok = light_read(&light_lux);
+	backlight_set_ambient(light_ok, light_lux);
+}
+
 static void report_tsl2591(struct readings *r)
 {
-	double lux;
-
-	/* Auto-gain and the lux formula live in light.c. */
-	if (!light_read(&lux)) {
+	if (!light_ok) {
 		LOG_INF("tsl2591: no reading (settling or unavailable)");
 		return;
 	}
 
-	LOG_INF("tsl2591: %.4g lux (%.1f dB, gain %s)", lux, light_db(lux), light_gain_name());
+	LOG_INF("tsl2591: %.4g lux (%.1f dB, gain %s)", light_lux, light_db(light_lux),
+		light_gain_name());
 	r->light_ok = true;
-	r->lux = lux;
+	r->lux = light_lux;
 }
 
 static void report_max17048(struct readings *r)
@@ -377,6 +389,8 @@ int main(void)
 	uint32_t tick = 0;
 
 	while (1) {
+		poll_light();
+
 		if (tick % REPORT_EVERY_TICKS == 0) {
 			struct readings r = { 0 };
 
@@ -390,7 +404,6 @@ int main(void)
 			report_ina219(&r);
 			r.wifi_ok = wifi_is_connected();
 
-			backlight_set_ambient(r.light_ok, r.lux);
 			history_add(&r);
 			ltlog_add(&r);
 			sdlog_add(&r);

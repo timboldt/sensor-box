@@ -9,11 +9,17 @@
  *
  *  - integrates for 200 ms, so a channel can reach the full 16-bit range
  *    (at 100 ms it saturates at 36863 counts);
- *  - steps the gain between x1, x25, x400 and x9200 to keep the full-spectrum
- *    channel (ch0) between GAIN_UP_BELOW and GAIN_DOWN_ABOVE counts, and
- *    steps down at once if either channel clips. ch0 alone decides "up":
- *    it always includes the IR in ch1, and requiring ch1 too (as the Rust code
- *    did) can oscillate under LED light, where ch1 is ~0;
+ *  - picks the gain from x1, x25, x400 and x9200 when the full-spectrum
+ *    channel (ch0) leaves GAIN_UP_BELOW..GAIN_DOWN_ABOVE counts: the highest
+ *    gain at which this reading would have been at most GAIN_TARGET counts,
+ *    so a big change (room lights on or off) is one jump, not one step per
+ *    reading. If either channel clips, the true count is unknown, so it drops
+ *    straight to x1. ch0 alone decides: it always includes the IR in ch1, and
+ *    requiring ch1 too (as the Rust code did) can oscillate under LED light,
+ *    where ch1 is ~0;
+ *  - a gain change restarts the sensor's integration (the driver powers it
+ *    down and up), so a reading within SETTLE_MS of one is dropped. Read
+ *    once a second, that never happens;
  *  - computes lux from the raw counts with the Adafruit / Zephyr formula
  *    (DF = 408): lux = (ch0 - ch1) * (1 - ch1/ch0) * 408 / (ms * gain).
  *
@@ -43,6 +49,8 @@ LOG_MODULE_REGISTER(light, LOG_LEVEL_INF);
 #define MAX_COUNT        65535
 #define GAIN_UP_BELOW    1000
 #define GAIN_DOWN_ABOVE  50000
+#define GAIN_TARGET      20000
+#define SETTLE_MS        (2 * INTEGRATION_MS + 100)
 
 static const struct device *const dev = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(tsl2591));
 
@@ -60,7 +68,7 @@ static const struct {
 static int gain_idx = 1;	/* start at x25: right for most rooms */
 static int read_gain_idx = 1;	/* the gain the last reading was taken at */
 static bool ok;
-static bool settling;		/* next reading may be from the old gain */
+static int64_t gain_changed_at;	/* uptime (ms) of the last gain change */
 
 static bool set_gain(int idx)
 {
@@ -72,7 +80,7 @@ static bool set_gain(int idx)
 		return false;
 	}
 	gain_idx = idx;
-	settling = true;
+	gain_changed_at = k_uptime_get();
 	return true;
 }
 
@@ -119,9 +127,8 @@ bool light_read(double *lux)
 		return false;
 	}
 
-	if (settling) {
-		/* Registers may still hold an integration from before the change. */
-		settling = false;
+	if (k_uptime_get() - gain_changed_at < SETTLE_MS) {
+		/* No complete integration at the new gain yet. */
 		return false;
 	}
 
@@ -140,14 +147,26 @@ bool light_read(double *lux)
 	LOG_DBG("ch0 %.0f ch1 %.0f gain %s -> %.4g lux", ch0, ch1, gains[gain_idx].name, *lux);
 
 	/* Gain for the next reading. */
-	if (clipped && gain_idx > 0) {
-		set_gain(gain_idx - 1);
-	} else if (ch0 > GAIN_DOWN_ABOVE && gain_idx > 0) {
-		set_gain(gain_idx - 1);
-	} else if (ch0 < GAIN_UP_BELOW && gain_idx < (int)ARRAY_SIZE(gains) - 1) {
-		set_gain(gain_idx + 1);
+	bool valid = !clipped || gain_idx == 0;	/* clipped at x1: a lower bound */
+	int want = gain_idx;
+
+	if (clipped) {
+		want = 0;
+	} else if (ch0 > GAIN_DOWN_ABOVE || ch0 < GAIN_UP_BELOW) {
+		/* The highest gain that would put this light at <= GAIN_TARGET. */
+		double c = MAX(ch0, 1.0) / gains[gain_idx].factor;
+
+		want = 0;
+		for (int i = ARRAY_SIZE(gains) - 1; i > 0; i--) {
+			if (c * gains[i].factor <= GAIN_TARGET) {
+				want = i;
+				break;
+			}
+		}
+	}
+	if (want != gain_idx) {
+		set_gain(want);
 	}
 
-	/* A clipped reading at the lowest gain is still a (lower-bound) value. */
-	return !clipped || gain_idx == 0;
+	return valid;
 }

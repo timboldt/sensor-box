@@ -50,10 +50,10 @@ LOG_MODULE_REGISTER(backlight, LOG_LEVEL_INF);
 #define WAKE_MS      30000
 /*
  * Missed readings in a row before giving up on the sensor and going to full
- * brightness. A single miss is routine: the reading after each gain change is
- * dropped. Readings come every 5 s, so 6 is about 30 s.
+ * brightness. An odd miss is routine (e.g. the reading after the light
+ * clipped). Readings come every second, so this is about 30 s.
  */
-#define MISSES_BEFORE_FAIL 6
+#define MISSES_BEFORE_FAIL 30
 
 static const struct pwm_dt_spec pwm = PWM_DT_SPEC_GET(DT_NODELABEL(tft_backlight));
 
