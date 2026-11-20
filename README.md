@@ -115,7 +115,9 @@ No RTC: wall-clock time, when needed, will come from SNTP over Wi-Fi.
 Once on Wi-Fi, open **http://sensor-box.local** (or the IP address the box
 logs at boot) on any device on the same network. It shows the current
 readings and trend charts for the last 10 minutes, hour, 4 hours, day,
-week, month or 3 months, in your browser's time zone. There is no login: anyone
+week, month or 3 months, in your browser's time zone. Click a chart to zoom
+in to the next shorter range around that moment; ← and → step through time
+and Now returns to the present. There is no login: anyone
 on the network can view it, and nothing can be changed from it.
 
 The page is `web/index.html`, built into the firmware. The JSON behind it
