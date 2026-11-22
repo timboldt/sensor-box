@@ -135,9 +135,11 @@ const METRICS = [
   { key: "batt_ma", name: "Battery current", unit: () => "mA", conv: v => v, dec: 0, span: () => 20,
     note: d => d.batt_ma === null || d.batt_ma === undefined ? "no sensor"
       : Math.abs(d.batt_ma) < 2 ? "idle" : d.batt_ma > 0 ? "charging" : "on battery" },
-  // Light as decibels re 1 lux (0 dB = 1 lux, -30 dB = 0.001 lux).
-  { key: "lux",   name: "Light", unit: () => "dB", conv: v => 10 * Math.log10(Math.max(v, 1e-5)),
-    dec: v => Math.abs(v) < 10 ? 1 : 0, span: () => 10, luxNote: true },
+  // Light in lux, log scale: moonlight to sunlight is a millionfold. Floored
+  // at 0.001 lux (the sensor resolves ~0.0002); dim values get 1 significant digit.
+  { key: "lux",   name: "Light", unit: () => "lux", conv: v => v,
+    dec: v => v >= 10 ? 0 : v >= 1 ? 1 : Math.min(3, -Math.floor(Math.log10(Math.max(v, 0.001)))),
+    span: () => 1, log: true, logFloor: 0.001, kilo: true },
 ];
 
 const decimals = (m, v) => typeof m.dec === "function" ? m.dec(v) : m.dec;
@@ -173,9 +175,6 @@ function renderTiles(d) {
     val.append(el("span", "unit", m.unit()));
     t.append(val);
     let note = m.warm && d[m.warm] ? "warming up" : m.note ? m.note(d) : "";
-    if (m.luxNote && raw !== null && raw !== undefined) {
-      note = (raw >= 10 ? raw.toFixed(0) : raw.toPrecision(2)) + " lux";
-    }
     t.append(el("div", "note", note));
     box.append(t);
   }
