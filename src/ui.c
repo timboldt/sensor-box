@@ -8,21 +8,21 @@
  *   +--------------+--------------+--------------+
  *   |     Temp     |   Humidity   |   Pressure   |  title
  *   |     70.5     |     9.8      |    30.07     |  current value
- *   |  15m 3h 24h  | 15m 3h 24h   | 15m  3h  24h |  change over the last
- *   | +.1 +1.2 -3  |  0  +.2 -.4  | +.01 +.06 -.1|  15 min, 3 h and 24 h
- *   +--------------+--------------+--------------+
+ *   |  +0.8 in 1h  |  -0.2 in 1h  | +0.06 in 3h  |  change over the window
+ *   +--------------+--------------+--------------+  that matters most
  *   |  Particles   |     CO2      |     TVOC     |  air-quality values,
  *   |     3500     |     400      |       0      |  CO2 and TVOC coloured
- *   |  15m 3h 24h  |  15m 3h 24h  |  15m 3h 24h  |  by band
- *   | +2k  0 -12k  | +60 +150 0   |  0   0  +30  |
+ *   | +2.1k in 15m |  +60 in 15m  |   0 in 15m   |  by band
  *   +--------------+--------------+--------------+
  *
- * A change shows in grey while it's within that reading's "steady" band (so
- * sensor noise stays quiet), otherwise in white, or for the pollutants in
- * green when falling and orange when rising. "--" means there isn't that much
- * history yet (it's in RAM; after a reboot it comes back from the SD card).
- * Pressure's 3 h change is the forecasters' "tendency": beyond ~1.6 hPa
- * (0.05 inHg) is rising or falling. Charts are on the web page.
+ * Each tile shows one change, over the window where it means most: 3 h for
+ * pressure (the forecasters' "tendency": beyond ~1.6 hPa, 0.05 inHg, is
+ * rising or falling), 1 h for temperature and humidity, 15 min for the
+ * pollutants (a window opened, someone cooking). It shows in grey while
+ * within that reading's "steady" band (so sensor noise stays quiet),
+ * otherwise in white, or for the pollutants green when falling and orange
+ * when rising. "--" means there isn't that much history yet (it's in RAM;
+ * after a reboot it comes back from the SD card). Charts are on the web page.
  *
  * Units are left off to keep the tiles uncluttered: temperature is in F or C
  * (CONFIG_SENSOR_BOX_US_UNITS), humidity absolute (g/m3: it follows the air's
@@ -58,7 +58,7 @@ LOG_MODULE_REGISTER(ui, LOG_LEVEL_INF);
 #define STATUS_H 28
 #define GAP      4
 #define PAD      6
-#define TREND_H  30	/* the two rows of change values at the bottom of a tile */
+#define TREND_H  30	/* the change line, at the bottom of a tile */
 
 #define US IS_ENABLED(CONFIG_SENSOR_BOX_US_UNITS)
 
@@ -82,47 +82,39 @@ enum tile_id {
 	T_COUNT,
 };
 
-/*
- * Change windows. Each compares the average of the newest `avg` minutes with
- * the average of `avg` minutes ending `minutes` ago, so one noisy reading
- * doesn't decide it. "24h" is 23.5 h apart, as far as the 24 h history goes.
- */
-#define N_WIN 3
-static const struct {
-	const char *label;
-	int minutes;
-	int avg;
-} win[N_WIN] = {
-	{ "15m", 15, 3 },
-	{ "3h", 180, 10 },
-	{ "24h", HISTORY_LEN - 30, 30 },
-};
-
 static const struct {
 	const char *title;
 	int decimals;			/* current value */
-	int delta_decimals;		/* change values (at most) */
+	int delta_decimals;		/* change (at most) */
 	enum history_series series;
 	bool pollutant;			/* falling is good: colour changes green / orange */
 	/*
-	 * A change is "steady" (grey) within max(steady[w], steady_rel x the
-	 * larger of the two values), in metric units (degC, hPa, ...).
+	 * The change compares the average of the newest `avg` minutes with the
+	 * average of `avg` minutes ending `minutes` ago, so one noisy reading
+	 * doesn't decide it.
 	 */
-	float steady[N_WIN];
+	const char *window;		/* shown after the change: "in 3h" */
+	int minutes;
+	int avg;
+	/*
+	 * A change is "steady" (grey) within max(steady, steady_rel x the larger
+	 * of the two values), in metric units (degC, hPa, ...).
+	 */
+	float steady;
 	float steady_rel;
 } tile_def[T_COUNT] = {
-	[T_TEMP] = { "Temp", 1, 1, H_TEMP, false, { 0.3f, 1.0f, 2.0f } },
-	[T_AH] = { "Humidity", 1, 1, H_AH, false, { 0.3f, 0.8f, 1.5f } },
-	[T_PRESS] = { "Pressure", US ? 2 : 0, US ? 2 : 1, H_PRESS, false, { 0.5f, 1.6f, 4.0f } },
-	[T_PC03] = { "Particles", 0, 0, H_PC03, true, { 300, 300, 300 }, 0.3f },
-	[T_CO2] = { "CO2", 0, 0, H_CO2, true, { 50, 100, 150 } },
-	[T_TVOC] = { "TVOC", 0, 0, H_TVOC, true, { 30, 30, 30 }, 0.3f },
+	[T_TEMP] = { "Temp", 1, 1, H_TEMP, false, "in 1h", 60, 5, 0.5f },
+	[T_AH] = { "Humidity", 1, 1, H_AH, false, "in 1h", 60, 5, 0.5f },
+	[T_PRESS] = { "Pressure", US ? 2 : 0, US ? 2 : 1, H_PRESS, false, "in 3h", 180, 10, 1.6f },
+	[T_PC03] = { "Particles", 0, 0, H_PC03, true, "in 15m", 15, 3, 300, 0.3f },
+	[T_CO2] = { "CO2", 0, 0, H_CO2, true, "in 15m", 15, 3, 50 },
+	[T_TVOC] = { "TVOC", 0, 0, H_TVOC, true, "in 15m", 15, 3, 30, 0.3f },
 };
 
 struct tile {
 	lv_obj_t *value;
-	lv_obj_t *trend;		/* holds the window labels and change values */
-	lv_obj_t *delta[N_WIN];
+	lv_obj_t *trend;		/* the change line: delta and its window */
+	lv_obj_t *delta;
 	lv_obj_t *note;			/* shown instead of trend, e.g. "warming up" */
 };
 
@@ -222,17 +214,18 @@ static void format(enum tile_id id, float v, char *buf, size_t len)
 	snprintf(buf, len, "%.*f", tile_def[id].decimals, (double)v);
 }
 
-/*
- * A change, signed, in at most about 4 characters so three fit across a
- * tile: "+1.2", "-.06", "+150", "+12k"; "0" when it rounds to nothing.
- */
+/* A change, signed: "+0.06", "-1.2", "+150", "+2.1k", "-12k"; "0" when it rounds to nothing. */
 static void format_delta(float d, int decimals, char *buf, size_t len)
 {
 	float a = fabsf(d);
 	const char *sign = d > 0.0f ? "+" : "-";
 
-	if (a >= 999.5f) {
+	if (a >= 9999.5f) {
 		snprintf(buf, len, "%s%.0fk", sign, (double)(a / 1000.0f));
+		return;
+	}
+	if (a >= 999.5f) {
+		snprintf(buf, len, "%s%.1fk", sign, (double)(a / 1000.0f));
 		return;
 	}
 	if (a >= 9.95f) {
@@ -240,19 +233,11 @@ static void format_delta(float d, int decimals, char *buf, size_t len)
 	} else if (a >= 0.995f) {
 		decimals = MIN(decimals, 1);
 	}
-
-	float scale = powf(10.0f, (float)decimals);
-
-	if (roundf(a * scale) == 0.0f) {
+	if (roundf(a * powf(10.0f, (float)decimals)) == 0.0f) {
 		snprintf(buf, len, "0");
 		return;
 	}
-
-	char num[16];
-
-	snprintf(num, sizeof(num), "%.*f", decimals, (double)a);
-	/* "0.06" -> ".06" */
-	snprintf(buf, len, "%s%s", sign, num[0] == '0' && num[1] == '.' ? num + 1 : num);
+	snprintf(buf, len, "%s%.*f", sign, decimals, (double)a);
 }
 
 /* Average of the valid points in [from, to]; NAN if none. */
@@ -270,45 +255,42 @@ static float average(const float *pts, int from, int to)
 	return n > 0 ? sum / n : NAN;
 }
 
-/* Fill in a tile's change values from the 24 h history. Call under lvgl_lock(). */
-static void update_changes(enum tile_id id)
+/* Fill in a tile's change from the 24 h history. Call under lvgl_lock(). */
+static void update_change(enum tile_id id)
 {
 	static float pts[HISTORY_LEN];	/* only used under lvgl_lock */
 	struct tile *t = &tiles[id];
 	int n = history_get(HW_LONG, tile_def[id].series, pts, HISTORY_LEN, 1);
 	int64_t covered_s = history_covered_s(HW_LONG);
+	int k = tile_def[id].avg;
+	int then_end = n - 1 - tile_def[id].minutes;
+	int then_start = then_end - k + 1;
+	float now = NAN;
+	float then = NAN;
 	char buf[24];
 
-	for (int w = 0; w < N_WIN; w++) {
-		int k = win[w].avg;
-		int then_end = n - 1 - win[w].minutes;
-		int then_start = then_end - k + 1;
-		float now = NAN;
-		float then = NAN;
-
-		/* Only compare against real history, not the boot-time backfill. */
-		if (then_start >= 0 && covered_s >= (int64_t)(n - 1 - then_start) * HISTORY_PERIOD_S) {
-			now = average(pts, n - k, n - 1);
-			then = average(pts, then_start, then_end);
-		}
-		if (isnan(now) || isnan(then)) {
-			lv_label_set_text_static(t->delta[w], "--");
-			lv_obj_set_style_text_color(t->delta[w], COL_MUTED, 0);
-			continue;
-		}
-
-		float d = now - then;	/* metric units */
-		float steady = MAX(tile_def[id].steady[w],
-				   tile_def[id].steady_rel * MAX(fabsf(now), fabsf(then)));
-		lv_color_t col = fabsf(d) < steady ? COL_MUTED
-				 : !tile_def[id].pollutant ? COL_TEXT
-				 : d > 0.0f ? COL_POOR : COL_GOOD;
-
-		format_delta(to_display(id, now) - to_display(id, then),
-			     tile_def[id].delta_decimals, buf, sizeof(buf));
-		lv_label_set_text(t->delta[w], buf);
-		lv_obj_set_style_text_color(t->delta[w], col, 0);
+	/* Only compare against real history, not the boot-time backfill. */
+	if (then_start >= 0 && covered_s >= (int64_t)(n - 1 - then_start) * HISTORY_PERIOD_S) {
+		now = average(pts, n - k, n - 1);
+		then = average(pts, then_start, then_end);
 	}
+	if (isnan(now) || isnan(then)) {
+		lv_label_set_text_static(t->delta, "--");
+		lv_obj_set_style_text_color(t->delta, COL_MUTED, 0);
+		return;
+	}
+
+	float d = now - then;	/* metric units */
+	float steady = MAX(tile_def[id].steady,
+			   tile_def[id].steady_rel * MAX(fabsf(now), fabsf(then)));
+	lv_color_t col = fabsf(d) < steady ? COL_MUTED
+			 : !tile_def[id].pollutant ? COL_TEXT
+			 : d > 0.0f ? COL_POOR : COL_GOOD;
+
+	format_delta(to_display(id, now) - to_display(id, then), tile_def[id].delta_decimals,
+		     buf, sizeof(buf));
+	lv_label_set_text(t->delta, buf);
+	lv_obj_set_style_text_color(t->delta, col, 0);
 }
 
 static lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font, lv_color_t colour)
@@ -344,28 +326,27 @@ static lv_obj_t *make_tile(lv_obj_t *parent, enum tile_id id, int32_t w, int32_t
 	lv_obj_align(t->value, LV_ALIGN_TOP_MID, 0, 16);
 
 	/*
-	 * Three columns: the window on top, its change below. They span the
-	 * whole tile, padding included: a change like "+150" is ~31 px wide.
+	 * The change line: "+0.06" (coloured) then "in 3h" (grey), centred. It
+	 * spans the whole tile, padding included: the widest, "+444k in 15m",
+	 * is 95 px.
 	 */
-	int32_t col_w = w / N_WIN;
-
 	t->trend = lv_obj_create(box);
 	lv_obj_remove_style_all(t->trend);
-	lv_obj_set_size(t->trend, LV_PCT(100), TREND_H);
+	lv_obj_set_size(t->trend, w, TREND_H);
 	lv_obj_align(t->trend, LV_ALIGN_BOTTOM_MID, 0, 0);
 	lv_obj_remove_flag(t->trend, LV_OBJ_FLAG_SCROLLABLE);
 	lv_obj_add_flag(t->trend, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
-	for (int i = 0; i < N_WIN; i++) {
-		int32_t x = (i - 1) * col_w;
-		lv_obj_t *label = make_label(t->trend, &lv_font_montserrat_12, COL_MUTED);
+	lv_obj_set_flex_flow(t->trend, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(t->trend, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+			      LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(t->trend, 5, 0);
 
-		lv_label_set_text_static(label, win[i].label);
-		lv_obj_align(label, LV_ALIGN_TOP_MID, x, 0);
+	t->delta = make_label(t->trend, &lv_font_montserrat_14, COL_MUTED);
+	lv_label_set_text_static(t->delta, "--");
 
-		t->delta[i] = make_label(t->trend, &lv_font_montserrat_14, COL_MUTED);
-		lv_label_set_text_static(t->delta[i], "--");
-		lv_obj_align(t->delta[i], LV_ALIGN_BOTTOM_MID, x, 0);
-	}
+	lv_obj_t *window = make_label(t->trend, &lv_font_montserrat_14, COL_MUTED);
+
+	lv_label_set_text_static(window, tile_def[id].window);
 
 	t->note = make_label(box, &lv_font_montserrat_14, COL_MUTED);
 	lv_obj_align(t->note, LV_ALIGN_BOTTOM_MID, 0, -(TREND_H - 14) / 2);
@@ -439,7 +420,7 @@ static void update_tile(enum tile_id id, const struct readings *r)
 		lv_obj_set_style_text_color(t->value, COL_MUTED, 0);
 	}
 
-	/* During a sensor's warm-up (or without one), say so instead of the changes. */
+	/* During a sensor's warm-up (or without one), say so instead of the change. */
 	const char *note = status_note(id, r);
 
 	lv_label_set_text_static(t->note, note ? note : "");
@@ -447,7 +428,7 @@ static void update_tile(enum tile_id id, const struct readings *r)
 		lv_obj_add_flag(t->trend, LV_OBJ_FLAG_HIDDEN);
 	} else {
 		lv_obj_remove_flag(t->trend, LV_OBJ_FLAG_HIDDEN);
-		update_changes(id);
+		update_change(id);
 	}
 }
 

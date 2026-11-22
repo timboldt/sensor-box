@@ -14,11 +14,13 @@ local network.
 ## Using it
 
 - The display shows a dashboard of current readings, each with its change
-  over the last 15 minutes, 3 hours and 24 hours (grey while steady; for
-  CO2, TVOC and particles green when falling, orange when rising), and the
-  local time once the clock has been set over the network. Pressure's 3 h
-  change is the forecasters' tendency: beyond ~1.6 hPa (0.05 inHg) it's
-  rising or falling. Charts are on the web page.
+  over the window that matters most for it: 3 hours for pressure (the
+  forecasters' tendency: beyond ~1.6 hPa, 0.05 inHg, it's rising or
+  falling), 1 hour for temperature and humidity, 15 minutes for particles,
+  CO2 and TVOC. A change is grey while steady, otherwise white, or for the
+  pollutants green when falling and orange when rising. The status bar has
+  the light level and, once the clock has been set over the network, the
+  local time. Charts are on the web page.
 - **Boot button:** wakes the screen when it's dark. Don't hold Boot while
   resetting or plugging in (that enters the ESP32-C6 download mode).
 - **Warm-up:** the particle readings show "warming up" for the first 30 s after power-up
