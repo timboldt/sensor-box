@@ -121,8 +121,12 @@ const METRICS = [
   { key: "co2",   name: "CO2", unit: () => "ppm", conv: v => v, dec: 0, span: () => 200,
     bands: [800, 1200, 2000], warm: "co2_warming", peak: "co2_max", min0: true, capSpikes: true,
     note: d => d.co2_present === false ? "no sensor" : "" },
-  { key: "tvoc",  name: "TVOC", unit: () => "ppb", conv: v => v, dec: 0, span: () => 50,
-    bands: [220, 660, 2200], warm: "gas_warming", peak: "tvoc_max", min0: true, capSpikes: true },
+  // TVOC (SGP30): idles near zero and jumps a hundredfold or more (cooking,
+  // cleaning; it tops out at 60000). Log scale, from 10 ppb (below is noise);
+  // span is in decades.
+  { key: "tvoc",  name: "TVOC", unit: () => "ppb", conv: v => v, dec: 0, span: () => 1,
+    bands: [220, 660, 2200], log: true, logFloor: 10, kilo: true,
+    warm: "gas_warming", peak: "tvoc_max" },
   // Particles >0.3 µm per litre: far livelier than PM2.5 in clean indoor air
   // (cooking, candles, dust). Log scale: it can jump a hundredfold.
   { key: "pc03",  name: "Particles >0.3 µm", unit: () => "/L", conv: v => v, dec: 0, span: () => 1,
@@ -229,7 +233,7 @@ function drawChart(container, m, pts, x0, x1, gap, peaks) {
   const ty = v => m.log ? Math.log10(Math.max(v, m.logFloor || 0.1)) : v;
   let lo = Math.min(...vals.map(p => ty(p[1])));
   let hi = Math.max(...vals.concat(peakVals).map(p => ty(p[1])));
-  // Pollutants: a brief huge spike (e.g. TVOC: the SGP30 tops out at 60000) would squash
+  // Pollutants: a brief huge spike (e.g. PM2.5 from burnt toast) would squash
   // everything else into a flat line. The axis follows the bulk of the main line
   // (its 90th percentile) with room for twice that range; anything higher is
   // pinned to the top edge and marked with a triangle.
