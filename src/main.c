@@ -341,10 +341,7 @@ static void report_scd4x(struct readings *r)
 	r->co2_ppm = co2.val1;
 }
 
-/*
- * Boot button (sw0, IO9). A press while the screen is dark only wakes it;
- * otherwise it moves to the next page. Runs on the input thread.
- */
+/* Boot button (sw0, IO9): wakes the screen when it's dark. Runs on the input thread. */
 static void on_input(struct input_event *evt, void *user_data)
 {
 	ARG_UNUSED(user_data);
@@ -356,10 +353,7 @@ static void on_input(struct input_event *evt, void *user_data)
 	if (evt->value != 1) {
 		return;
 	}
-	if (backlight_wake()) {
-		return;
-	}
-	ui_next_page();
+	backlight_wake();
 }
 
 INPUT_CALLBACK_DEFINE(DEVICE_DT_GET(DT_PARENT(DT_ALIAS(sw0))), on_input, NULL);

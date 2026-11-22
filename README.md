@@ -13,12 +13,14 @@ local network.
 
 ## Using it
 
-- The display shows a dashboard of current readings with 6-hour trends, and
-  the local time once the clock has been set over the network.
-- **Boot button:** press to page through a full-screen chart for each
-  reading, plus PM2.5 and light level (in dB, see below); after the last it returns to the dashboard, and it also returns
-  on its own after a minute. Don't hold Boot while resetting or plugging in
-  (that enters the ESP32-C6 download mode).
+- The display shows a dashboard of current readings, each with its change
+  over the last 15 minutes, 3 hours and 24 hours (grey while steady; for
+  CO2, TVOC and particles green when falling, orange when rising), and the
+  local time once the clock has been set over the network. Pressure's 3 h
+  change is the forecasters' tendency: beyond ~1.6 hPa (0.05 inHg) it's
+  rising or falling. Charts are on the web page.
+- **Boot button:** wakes the screen when it's dark. Don't hold Boot while
+  resetting or plugging in (that enters the ESP32-C6 download mode).
 - **Warm-up:** the particle readings show "warming up" for the first 30 s after power-up
   (fan spin-up), TVOC for the SGP30's first ~15 s, and CO2 until the SCD-43's
   first measurement (~5 s).
@@ -38,9 +40,8 @@ local network.
   about 4 months, oldest dropped first), kept across reboots and reflashes.
   `ltlog show [n]` lists the newest records (UTC), `ltlog clear` erases them.
 - **Particles:** besides PM2.5, the count of particles larger than 0.3 µm
-  per litre is shown on a log scale (the screen's dashboard tile, where it
-  replaces PM2.5, which has a chart page instead; a tile and chart on the
-  web page). In clean indoor air PM2.5 sits near 0 while this count still
+  per litre is shown (on the screen in place of PM2.5, and as a tile and
+  log-scale chart on the web page). In clean indoor air PM2.5 sits near 0 while this count still
   reacts to cooking, candles and dust. The web PM2.5 tile also
   notes PM1 and PM10, which indoors track PM2.5 closely.
 - **microSD card** (in the TFT FeatherWing's slot, FAT32): mounted at boot
@@ -66,14 +67,14 @@ local network.
 - **Humidity** is shown as absolute humidity (g/m³ of water vapour), which
   follows the air's actual moisture; relative humidity swings with
   temperature. %RH is still logged, and noted on the web page's tile.
-- **Light level** is shown in decibels relative to 1 lux (0 dB = 1 lux,
-  +20 dB = 100 lux, -20 dB = 0.01 lux). The TSL2591's gain is adjusted
-  automatically (x1 to x9200), so it reads from daylight down to about
-  -37 dB (~0.0002 lux).
+- **Light level** is shown in lux (the screen's status bar; a log-scale
+  chart on the web page). The TSL2591's gain is adjusted automatically (x1
+  to x9200), so it reads from daylight down to about 0.0002 lux. The hourly
+  log stores it in decibels relative to 1 lux (0 dB = 1 lux, -20 dB =
+  0.01 lux).
 - **Backlight:** dims with the room light, from full brightness at 15 lux
   and up to 1% at 0.02 lux, and switches off below 0.01 lux. In a dark room a
-  press of Boot turns it on, dimly, for 30 s (that first press only wakes
-  the screen).
+  press of Boot turns it on, dimly, for 30 s.
 
 ## Hardware
 
