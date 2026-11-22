@@ -13,13 +13,13 @@
  *   |     70.5     |     9.8      |    30.07     |  current value
  *   |  ___/‾‾\__   |  ‾‾\___/‾    |  ____/‾‾‾    |  trend, last 15 min
  *   +--------------+--------------+--------------+
- *   |    PM2.5     |     CO2      |     TVOC     |  air-quality values
- *   |       6      |     400      |       0      |  coloured by band
+ *   |  Particles   |     CO2      |     TVOC     |  air-quality values
+ *   |     3500     |     400      |       0      |  CO2, TVOC coloured by band
  *   |  _/\___/\_   |  __/‾‾\__    |  ___/\___    |
  *   +--------------+--------------+--------------+
  *
- * Chart page, one per reading, plus one for the >0.3 um particle count (log
- * scale) and one for light (dB re 1 lux):
+ * Chart page, one per reading, plus one for PM2.5 and one for light (dB re
+ * 1 lux):
  *   | Temperature                       70.5 °F  |
  *   |  72.0 +--------------------------------+   |
  *   |       |        ___/‾‾‾\___             |   |
@@ -33,7 +33,8 @@
  * On the dashboard units are left off to keep the tiles uncluttered:
  * temperature is in F or C (CONFIG_SENSOR_BOX_US_UNITS), humidity absolute
  * (g/m3: it follows the air's moisture, where %RH swings with temperature),
- * pressure sea-level (MSL) inHg or hPa, PM2.5 ug/m3, CO2 ppm, TVOC ppb.
+ * pressure sea-level (MSL) inHg or hPa, particles >0.3 um per litre (log
+ * scale: far livelier than PM2.5 in clean indoor air), CO2 ppm, TVOC ppb.
  * The chart pages show the unit.
  *
  * Each trend line auto-scales to its own data, with a minimum span so sensor
@@ -100,11 +101,11 @@ enum tile_id {
 	T_TEMP,
 	T_AH,
 	T_PRESS,
-	T_PM25,
+	T_PC03,			/* particles >0.3 um */
 	T_CO2,
 	T_TVOC,
 	T_TILES,		/* the readings above have dashboard tiles */
-	T_PC03 = T_TILES,	/* chart pages only: particles >0.3 um, */
+	T_PM25 = T_TILES,	/* chart pages only: PM2.5, */
 	T_LIGHT,		/* and light (lux is in the status bar) */
 	T_COUNT,
 };

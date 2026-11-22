@@ -16,11 +16,10 @@ local network.
 - The display shows a dashboard of current readings with 6-hour trends, and
   the local time once the clock has been set over the network.
 - **Boot button:** press to page through a full-screen chart for each
-  reading, plus the >0.3 µm particle count and light level (in dB, see
-  below); after the last it returns to the dashboard, and it also returns
+  reading, plus PM2.5 and light level (in dB, see below); after the last it returns to the dashboard, and it also returns
   on its own after a minute. Don't hold Boot while resetting or plugging in
   (that enters the ESP32-C6 download mode).
-- **Warm-up:** PM2.5 shows "warming up" for the first 30 s after power-up
+- **Warm-up:** the particle readings show "warming up" for the first 30 s after power-up
   (fan spin-up), TVOC for the SGP30's first ~15 s, and CO2 until the SCD-43's
   first measurement (~5 s).
 - **CO2** comes from an SCD-43 (true CO2, 400–5000 ppm), corrected with the
@@ -39,9 +38,10 @@ local network.
   about 4 months, oldest dropped first), kept across reboots and reflashes.
   `ltlog show [n]` lists the newest records (UTC), `ltlog clear` erases them.
 - **Particles:** besides PM2.5, the count of particles larger than 0.3 µm
-  per litre is charted (a chart page on the screen, a tile and chart on the
-  web page) on a log scale. In clean indoor air PM2.5 sits near 0 while this
-  count still reacts to cooking, candles and dust. The web PM2.5 tile also
+  per litre is shown on a log scale (the screen's dashboard tile, where it
+  replaces PM2.5, which has a chart page instead; a tile and chart on the
+  web page). In clean indoor air PM2.5 sits near 0 while this count still
+  reacts to cooking, candles and dust. The web PM2.5 tile also
   notes PM1 and PM10, which indoors track PM2.5 closely.
 - **microSD card** (in the TFT FeatherWing's slot, FAT32): mounted at boot
   at `/SD:`. Every minute's readings go to one CSV file per UTC day,
