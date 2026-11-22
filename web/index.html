@@ -121,8 +121,12 @@ const METRICS = [
   { key: "co2",   name: "CO2", unit: () => "ppm", conv: v => v, dec: 0, span: () => 200,
     bands: [800, 1200, 2000], warm: "co2_warming", peak: "co2_max", min0: true, capSpikes: true,
     note: d => d.co2_present === false ? "no sensor" : "" },
-  { key: "tvoc",  name: "TVOC", unit: () => "ppb", conv: v => v, dec: 0, span: () => 50,
-    bands: [220, 660, 2200], warm: "gas_warming", peak: "tvoc_max", min0: true, capSpikes: true },
+  // TVOC (SGP30): idles near zero and jumps a hundredfold or more (cooking,
+  // cleaning; it tops out at 60000). Log scale, from 10 ppb (below is noise);
+  // span is in decades.
+  { key: "tvoc",  name: "TVOC", unit: () => "ppb", conv: v => v, dec: 0, span: () => 1,
+    bands: [220, 660, 2200], log: true, logFloor: 10, kilo: true,
+    warm: "gas_warming", peak: "tvoc_max" },
   // Particles >0.3 µm per litre: far livelier than PM2.5 in clean indoor air
   // (cooking, candles, dust). Log scale: it can jump a hundredfold.
   { key: "pc03",  name: "Particles >0.3 µm", unit: () => "/L", conv: v => v, dec: 0, span: () => 1,
@@ -131,9 +135,11 @@ const METRICS = [
   { key: "batt_ma", name: "Battery current", unit: () => "mA", conv: v => v, dec: 0, span: () => 20,
     note: d => d.batt_ma === null || d.batt_ma === undefined ? "no sensor"
       : Math.abs(d.batt_ma) < 2 ? "idle" : d.batt_ma > 0 ? "charging" : "on battery" },
-  // Light as decibels re 1 lux (0 dB = 1 lux, -30 dB = 0.001 lux).
-  { key: "lux",   name: "Light", unit: () => "dB", conv: v => 10 * Math.log10(Math.max(v, 1e-5)),
-    dec: v => Math.abs(v) < 10 ? 1 : 0, span: () => 10, luxNote: true },
+  // Light in lux, log scale: moonlight to sunlight is a millionfold. Floored
+  // at 0.001 lux (the sensor resolves ~0.0002); dim values get 1 significant digit.
+  { key: "lux",   name: "Light", unit: () => "lux", conv: v => v,
+    dec: v => v >= 10 ? 0 : v >= 1 ? 1 : Math.min(3, -Math.floor(Math.log10(Math.max(v, 0.001)))),
+    span: () => 1, log: true, logFloor: 0.001, kilo: true },
 ];
 
 const decimals = (m, v) => typeof m.dec === "function" ? m.dec(v) : m.dec;
@@ -169,9 +175,6 @@ function renderTiles(d) {
     val.append(el("span", "unit", m.unit()));
     t.append(val);
     let note = m.warm && d[m.warm] ? "warming up" : m.note ? m.note(d) : "";
-    if (m.luxNote && raw !== null && raw !== undefined) {
-      note = (raw >= 10 ? raw.toFixed(0) : raw.toPrecision(2)) + " lux";
-    }
     t.append(el("div", "note", note));
     box.append(t);
   }
@@ -197,6 +200,24 @@ function timeLabel(t, spanS) {
 
 let pendingDraws = [];
 let clipCount = 0;
+
+// Gridlines for a log axis spanning log10 values lo..hi (as log10 values):
+// the powers of ten inside it, every other one if that's more than 5, or
+// 1-2-5 steps if fewer than 2 powers of ten fit.
+function logTicks(lo, hi) {
+  const decades = [];
+  for (let k = Math.ceil(lo); k <= Math.floor(hi); k++) decades.push(k);
+  if (decades.length > 5) return decades.filter(k => k % 2 === 0);
+  if (decades.length >= 2) return decades;
+  const out = [];
+  for (let k = Math.floor(lo); k <= Math.ceil(hi); k++) {
+    for (const f of [1, 2, 5]) {
+      const v = k + Math.log10(f);
+      if (v >= lo && v <= hi) out.push(v);
+    }
+  }
+  return out;
+}
 
 // pts: [[t (unix s), v (display units) or null], ...]; gap: max seconds between joined points
 // peaks (optional): a second series, e.g. each hour's highest reading, drawn
@@ -229,7 +250,7 @@ function drawChart(container, m, pts, x0, x1, gap, peaks) {
   const ty = v => m.log ? Math.log10(Math.max(v, m.logFloor || 0.1)) : v;
   let lo = Math.min(...vals.map(p => ty(p[1])));
   let hi = Math.max(...vals.concat(peakVals).map(p => ty(p[1])));
-  // Pollutants: a brief huge spike (e.g. TVOC: the SGP30 tops out at 60000) would squash
+  // Pollutants: a brief huge spike (e.g. PM2.5 from burnt toast) would squash
   // everything else into a flat line. The axis follows the bulk of the main line
   // (its 90th percentile) with room for twice that range; anything higher is
   // pinned to the top edge and marked with a triangle.
@@ -264,10 +285,11 @@ function drawChart(container, m, pts, x0, x1, gap, peaks) {
     clip.append(svgEl("rect", { x: L, y: 0, width: W - L - R, height: H }));
     svg.append(clip);
 
-    // y grid + labels (3 lines)
-    for (let i = 0; i <= 2; i++) {
-      const yv = lo + (hi - lo) * i / 2;
-      const y = T + (1 - i / 2) * (H - T - B);
+    // y grid + labels: 3 evenly spaced lines, or on a log axis round values
+    // (10, 100, 1000, ...) so the labels mean something.
+    const ticks = m.log ? logTicks(lo, hi) : [0, 1, 2].map(i => lo + (hi - lo) * i / 2);
+    for (const yv of ticks) {
+      const y = T + (1 - (yv - lo) / (hi - lo)) * (H - T - B);
       svg.append(svgEl("line", { x1: L, x2: W - R, y1: y, y2: y, stroke: "var(--grid)" }));
       const real = m.log ? Math.pow(10, yv) : yv;
       const lab = svgEl("text", { x: L - 6, y: y + 4, "text-anchor": "end" });
