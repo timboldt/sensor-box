@@ -202,6 +202,24 @@ function timeLabel(t, spanS) {
 let pendingDraws = [];
 let clipCount = 0;
 
+// Gridlines for a log axis spanning log10 values lo..hi (as log10 values):
+// the powers of ten inside it, every other one if that's more than 5, or
+// 1-2-5 steps if fewer than 2 powers of ten fit.
+function logTicks(lo, hi) {
+  const decades = [];
+  for (let k = Math.ceil(lo); k <= Math.floor(hi); k++) decades.push(k);
+  if (decades.length > 5) return decades.filter(k => k % 2 === 0);
+  if (decades.length >= 2) return decades;
+  const out = [];
+  for (let k = Math.floor(lo); k <= Math.ceil(hi); k++) {
+    for (const f of [1, 2, 5]) {
+      const v = k + Math.log10(f);
+      if (v >= lo && v <= hi) out.push(v);
+    }
+  }
+  return out;
+}
+
 // pts: [[t (unix s), v (display units) or null], ...]; gap: max seconds between joined points
 // peaks (optional): a second series, e.g. each hour's highest reading, drawn
 // as a fainter line above the averages.
@@ -268,10 +286,11 @@ function drawChart(container, m, pts, x0, x1, gap, peaks) {
     clip.append(svgEl("rect", { x: L, y: 0, width: W - L - R, height: H }));
     svg.append(clip);
 
-    // y grid + labels (3 lines)
-    for (let i = 0; i <= 2; i++) {
-      const yv = lo + (hi - lo) * i / 2;
-      const y = T + (1 - i / 2) * (H - T - B);
+    // y grid + labels: 3 evenly spaced lines, or on a log axis round values
+    // (10, 100, 1000, ...) so the labels mean something.
+    const ticks = m.log ? logTicks(lo, hi) : [0, 1, 2].map(i => lo + (hi - lo) * i / 2);
+    for (const yv of ticks) {
+      const y = T + (1 - (yv - lo) / (hi - lo)) * (H - T - B);
       svg.append(svgEl("line", { x1: L, x2: W - R, y1: y, y2: y, stroke: "var(--grid)" }));
       const real = m.log ? Math.pow(10, yv) : yv;
       const lab = svgEl("text", { x: L - 6, y: y + 4, "text-anchor": "end" });
