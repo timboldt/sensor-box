@@ -8,11 +8,13 @@
  *   +--------------+--------------+--------------+
  *   |     Temp     |   Humidity   |   Pressure   |  title
  *   |     70.5     |     9.8      |    30.07     |  current value
+ *   |   warming    |              |    rising    |  what it means, in words
  *   |  +0.8 in 1h  |  -0.2 in 1h  | +0.06 in 3h  |  change over the window
  *   +--------------+--------------+--------------+  that matters most
  *   |  Particles   |     CO2      |     TVOC     |  air-quality values,
  *   |     3500     |     400      |       0      |  CO2 and TVOC coloured
- *   | +2.1k in 15m |  +60 in 15m  |   0 in 15m   |  by band
+ *   |    rising    |     good     |     good     |  by band
+ *   | +2.1k in 15m |  +60 in 15m  |   0 in 15m   |
  *   +--------------+--------------+--------------+
  *
  * Each tile shows one change, over the window where it means most: 3 h for
@@ -23,6 +25,11 @@
  * otherwise in white, or for the pollutants green when falling and orange
  * when rising. "--" means there isn't that much history yet (it's in RAM;
  * after a reboot it comes back from the SD card). Charts are on the web page.
+ *
+ * The line of words above the change (see describe()): pressure's tendency
+ * on the forecasters' scale (steady / rising / rising fast / rapid rise),
+ * warming or cooling, damper or drier, particles rising or clearing
+ * (blank while steady), and CO2's and TVOC's air-quality band.
  *
  * Units are left off to keep the tiles uncluttered: temperature is in F or C
  * (CONFIG_SENSOR_BOX_US_UNITS), humidity absolute (g/m3: it follows the air's
@@ -58,7 +65,7 @@ LOG_MODULE_REGISTER(ui, LOG_LEVEL_INF);
 #define STATUS_H 28
 #define GAP      4
 #define PAD      6
-#define TREND_H  30	/* the change line, at the bottom of a tile */
+#define LINE_H   16	/* a line of Montserrat 14 */
 
 #define US IS_ENABLED(CONFIG_SENSOR_BOX_US_UNITS)
 
@@ -113,6 +120,7 @@ static const struct {
 
 struct tile {
 	lv_obj_t *value;
+	lv_obj_t *word;			/* what the change or level means, in words */
 	lv_obj_t *trend;		/* the change line: delta and its window */
 	lv_obj_t *delta;
 	lv_obj_t *note;			/* shown instead of trend, e.g. "warming up" */
@@ -183,7 +191,7 @@ static bool current_value(enum tile_id id, const struct readings *r, float *v)
  *   CO2:   common indoor ventilation guidance.
  *   TVOC:  German UBA indoor-air levels, in ppb.
  */
-static lv_color_t value_colour(enum tile_id id, float v)
+static int band(enum tile_id id, float v)
 {
 	static const float bands[T_COUNT][3] = {
 		[T_CO2] = { 800, 1200, 2000 },
@@ -191,18 +199,23 @@ static lv_color_t value_colour(enum tile_id id, float v)
 	};
 
 	if (id != T_CO2 && id != T_TVOC) {
-		return COL_TEXT;
+		return -1;
 	}
-	if (v <= bands[id][0]) {
-		return COL_GOOD;
-	}
-	if (v <= bands[id][1]) {
-		return COL_FAIR;
-	}
-	if (v <= bands[id][2]) {
-		return COL_POOR;
-	}
-	return COL_BAD;
+	return v <= bands[id][0] ? 0 : v <= bands[id][1] ? 1 : v <= bands[id][2] ? 2 : 3;
+}
+
+static const char *const band_word[] = { "good", "fair", "poor", "bad" };
+
+static lv_color_t band_colour(int b)
+{
+	return b == 0 ? COL_GOOD : b == 1 ? COL_FAIR : b == 2 ? COL_POOR : COL_BAD;
+}
+
+static lv_color_t value_colour(enum tile_id id, float v)
+{
+	int b = band(id, v);
+
+	return b < 0 ? COL_TEXT : band_colour(b);
 }
 
 static void format(enum tile_id id, float v, char *buf, size_t len)
@@ -255,8 +268,62 @@ static float average(const float *pts, int from, int to)
 	return n > 0 ? sum / n : NAN;
 }
 
-/* Fill in a tile's change from the 24 h history. Call under lvgl_lock(). */
-static void update_change(enum tile_id id)
+/*
+ * The words for a tile, and their colour: from the change d (metric units)
+ * if have_d, outside the steady band; for CO2 and TVOC from the current
+ * value v if have_v. "" for nothing to say.
+ */
+static const char *describe(enum tile_id id, bool have_d, float d, float steady, bool have_v,
+			    float v, lv_color_t *col)
+{
+	bool up = d > 0.0f;
+	bool moving = have_d && fabsf(d) >= steady;
+
+	*col = COL_TEXT;
+	switch (id) {
+	case T_PRESS:
+		/*
+		 * Met Office / WMO tendency over 3 h: steady (here below 1.6 hPa,
+		 * where the daily pressure tide alone moves it), rising/falling to
+		 * 3.5, quickly to 6, very rapidly beyond.
+		 */
+		if (!have_d) {
+			return "";
+		}
+		if (fabsf(d) < 1.6f) {
+			*col = COL_MUTED;
+			return "steady";
+		}
+		if (fabsf(d) < 3.6f) {
+			return up ? "rising" : "falling";
+		}
+		*col = fabsf(d) <= 6.0f ? COL_FAIR : COL_POOR;
+		return fabsf(d) <= 6.0f ? (up ? "rising fast" : "falling fast")
+					: (up ? "rapid rise" : "rapid fall");
+	case T_TEMP:
+		return !moving ? "" : up ? "warming" : "cooling";
+	case T_AH:
+		return !moving ? "" : up ? "damper" : "drier";
+	case T_PC03:
+		*col = up ? COL_POOR : COL_GOOD;
+		return !moving ? "" : up ? "rising" : "clearing";
+	case T_CO2:
+	case T_TVOC:
+		if (!have_v) {
+			return "";
+		}
+		*col = band_colour(band(id, v));
+		return band_word[band(id, v)];
+	default:
+		return "";
+	}
+}
+
+/*
+ * Fill in a tile's change (from the 24 h history) and words. v is the
+ * current value in display units, if have_v. Call under lvgl_lock().
+ */
+static void update_change(enum tile_id id, bool have_v, float v)
 {
 	static float pts[HISTORY_LEN];	/* only used under lvgl_lock */
 	struct tile *t = &tiles[id];
@@ -274,19 +341,25 @@ static void update_change(enum tile_id id)
 		now = average(pts, n - k, n - 1);
 		then = average(pts, then_start, then_end);
 	}
-	if (isnan(now) || isnan(then)) {
+	bool have_d = !isnan(now) && !isnan(then);
+	float d = have_d ? now - then : 0.0f;	/* metric units */
+	float steady = have_d ? MAX(tile_def[id].steady,
+				    tile_def[id].steady_rel * MAX(fabsf(now), fabsf(then)))
+			      : 0.0f;
+	lv_color_t col;
+
+	lv_label_set_text_static(t->word, describe(id, have_d, d, steady, have_v, v, &col));
+	lv_obj_set_style_text_color(t->word, col, 0);
+
+	if (!have_d) {
 		lv_label_set_text_static(t->delta, "--");
 		lv_obj_set_style_text_color(t->delta, COL_MUTED, 0);
 		return;
 	}
 
-	float d = now - then;	/* metric units */
-	float steady = MAX(tile_def[id].steady,
-			   tile_def[id].steady_rel * MAX(fabsf(now), fabsf(then)));
-	lv_color_t col = fabsf(d) < steady ? COL_MUTED
-			 : !tile_def[id].pollutant ? COL_TEXT
-			 : d > 0.0f ? COL_POOR : COL_GOOD;
-
+	col = fabsf(d) < steady ? COL_MUTED
+	      : !tile_def[id].pollutant ? COL_TEXT
+	      : d > 0.0f ? COL_POOR : COL_GOOD;
 	format_delta(to_display(id, now) - to_display(id, then), tile_def[id].delta_decimals,
 		     buf, sizeof(buf));
 	lv_label_set_text(t->delta, buf);
@@ -326,13 +399,20 @@ static lv_obj_t *make_tile(lv_obj_t *parent, enum tile_id id, int32_t w, int32_t
 	lv_obj_align(t->value, LV_ALIGN_TOP_MID, 0, 16);
 
 	/*
-	 * The change line: "+0.06" (coloured) then "in 3h" (grey), centred. It
-	 * spans the whole tile, padding included: the widest, "+444k in 15m",
-	 * is 95 px.
+	 * The words, between the value (which ends 46 px down) and the change
+	 * line. The widest, "falling fast", is 74 px.
+	 */
+	t->word = make_label(box, &lv_font_montserrat_14, COL_TEXT);
+	lv_obj_align(t->word, LV_ALIGN_BOTTOM_MID, 0, -(LINE_H + 3));
+
+	/*
+	 * The change line, at the very bottom: "+0.06" (coloured) then "in 3h"
+	 * (grey), centred. It spans the whole tile, padding included: the
+	 * widest, "+444k in 15m", is 95 px.
 	 */
 	t->trend = lv_obj_create(box);
 	lv_obj_remove_style_all(t->trend);
-	lv_obj_set_size(t->trend, w, TREND_H);
+	lv_obj_set_size(t->trend, w, LINE_H);
 	lv_obj_align(t->trend, LV_ALIGN_BOTTOM_MID, 0, 0);
 	lv_obj_remove_flag(t->trend, LV_OBJ_FLAG_SCROLLABLE);
 	lv_obj_add_flag(t->trend, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
@@ -349,7 +429,7 @@ static lv_obj_t *make_tile(lv_obj_t *parent, enum tile_id id, int32_t w, int32_t
 	lv_label_set_text_static(window, tile_def[id].window);
 
 	t->note = make_label(box, &lv_font_montserrat_14, COL_MUTED);
-	lv_obj_align(t->note, LV_ALIGN_BOTTOM_MID, 0, -(TREND_H - 14) / 2);
+	lv_obj_align(t->note, LV_ALIGN_BOTTOM_MID, 0, -(LINE_H + 3) / 2);
 
 	return box;
 }
@@ -409,9 +489,10 @@ static void update_tile(enum tile_id id, const struct readings *r)
 {
 	struct tile *t = &tiles[id];
 	char buf[32];
-	float v;
+	float v = 0.0f;
+	bool have_v = current_value(id, r, &v);
 
-	if (current_value(id, r, &v)) {
+	if (have_v) {
 		format(id, v, buf, sizeof(buf));
 		lv_label_set_text(t->value, buf);
 		lv_obj_set_style_text_color(t->value, value_colour(id, v), 0);
@@ -426,9 +507,11 @@ static void update_tile(enum tile_id id, const struct readings *r)
 	lv_label_set_text_static(t->note, note ? note : "");
 	if (note) {
 		lv_obj_add_flag(t->trend, LV_OBJ_FLAG_HIDDEN);
+		lv_obj_add_flag(t->word, LV_OBJ_FLAG_HIDDEN);
 	} else {
 		lv_obj_remove_flag(t->trend, LV_OBJ_FLAG_HIDDEN);
-		update_change(id);
+		lv_obj_remove_flag(t->word, LV_OBJ_FLAG_HIDDEN);
+		update_change(id, have_v, v);
 	}
 }
 

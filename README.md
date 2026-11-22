@@ -18,7 +18,11 @@ local network.
   forecasters' tendency: beyond ~1.6 hPa, 0.05 inHg, it's rising or
   falling), 1 hour for temperature and humidity, 15 minutes for particles,
   CO2 and TVOC. A change is grey while steady, otherwise white, or for the
-  pollutants green when falling and orange when rising. The status bar has
+  pollutants green when falling and orange when rising. Above it, in words:
+  pressure's tendency (steady, rising, rising fast, rapid rise, and the same
+  falling), warming or cooling, damper or drier, particles rising or
+  clearing (blank while steady), and CO2's and TVOC's air-quality band
+  (good, fair, poor, bad). The status bar has
   the light level and, once the clock has been set over the network, the
   local time. Charts are on the web page.
 - **Boot button:** wakes the screen when it's dark. Don't hold Boot while
