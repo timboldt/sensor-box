@@ -3,52 +3,49 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * Two kinds of page, cycled with the Boot button (ui_next_page):
- *
- * Dashboard (default):
  *   +--------------------------------------------+
- *   | light          9:41 PM      wifi  battery |  status bar (all pages)
+ *   | light          9:41 PM      wifi  battery |  status bar
  *   +--------------+--------------+--------------+
  *   |     Temp     |   Humidity   |   Pressure   |  title
  *   |     70.5     |     9.8      |    30.07     |  current value
- *   |  ___/‾‾\__   |  ‾‾\___/‾    |  ____/‾‾‾    |  trend, last 15 min
+ *   |   warming    |              |    rising    |  what it means, in words
+ *   |  +0.8 in 1h  |  -0.2 in 1h  | +0.06 in 3h  |  change over the window
+ *   +--------------+--------------+--------------+  that matters most
+ *   |  Particles   |     CO2      |     TVOC     |  air-quality values,
+ *   |     3500     |     400      |       0      |  CO2 and TVOC coloured
+ *   |    rising    |     good     |     good     |  by band
+ *   | +2.1k in 15m |  +60 in 15m  |   0 in 15m   |
  *   +--------------+--------------+--------------+
- *   |    PM2.5     |     CO2      |     TVOC     |  air-quality values
- *   |       6      |     400      |       0      |  coloured by band
- *   |  _/\___/\_   |  __/‾‾\__    |  ___/\___    |
- *   +--------------+--------------+--------------+
  *
- * Chart page, one per reading, plus one for the >0.3 um particle count (log
- * scale) and one for light (dB re 1 lux):
- *   | Temperature                       70.5 °F  |
- *   |  72.0 +--------------------------------+   |
- *   |       |        ___/‾‾‾\___             |   |
- *   |  70.0 |-------/-----------\------------|   |
- *   |       |  ____/             \____       |   |
- *   |  68.0 +--------------------------------+   |
- *   |        -6h            -3h            now   |
+ * Each tile shows one change, over the window where it means most: 3 h for
+ * pressure (the forecasters' "tendency": beyond ~1.6 hPa, 0.05 inHg, is
+ * rising or falling), 1 h for temperature and humidity, 15 min for the
+ * pollutants (a window opened, someone cooking). It shows in grey while
+ * within that reading's "steady" band (so sensor noise stays quiet),
+ * otherwise in white, or for the pollutants green when falling and orange
+ * when rising. "--" means there isn't that much history yet (it's in RAM;
+ * after a reboot it comes back from the SD card). Charts are on the web page.
  *
- * After RETURN_MS without a press it goes back to the dashboard.
+ * The line of words above the change (see describe()): pressure's tendency
+ * on the forecasters' scale (steady / rising / rising fast / rapid rise),
+ * warming or cooling, damper or drier, particles rising or clearing
+ * (blank while steady), and CO2's and TVOC's air-quality band.
  *
- * On the dashboard units are left off to keep the tiles uncluttered:
- * temperature is in F or C (CONFIG_SENSOR_BOX_US_UNITS), humidity absolute
- * (g/m3: it follows the air's moisture, where %RH swings with temperature),
- * pressure sea-level (MSL) inHg or hPa, PM2.5 ug/m3, CO2 ppm, TVOC ppb.
- * The chart pages show the unit.
- *
- * Each trend line auto-scales to its own data, with a minimum span so sensor
- * noise does not look like a big swing.
+ * Units are left off to keep the tiles uncluttered: temperature is in F or C
+ * (CONFIG_SENSOR_BOX_US_UNITS), humidity absolute (g/m3: it follows the air's
+ * moisture, where %RH swings with temperature), pressure sea-level (MSL) inHg
+ * or hPa, particles >0.3 um per litre (far livelier than PM2.5 in clean
+ * indoor air), CO2 ppm, TVOC ppb.
  *
  * LVGL runs on its own workqueue (CONFIG_LV_Z_RUN_LVGL_ON_WORKQUEUE), and
- * this module is called from the sensor loop, the input thread and the
- * system workqueue, so every LVGL call and all page state is under
+ * ui_update is called from the sensor loop, so every LVGL call is under
  * lvgl_lock().
  */
 
 #include <errno.h>
 #include <math.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/display.h>
@@ -60,7 +57,6 @@
 #include <lvgl_zephyr.h>
 
 #include "history.h"
-#include "light.h"
 #include "timesync.h"
 #include "ui.h"
 
@@ -69,115 +65,71 @@ LOG_MODULE_REGISTER(ui, LOG_LEVEL_INF);
 #define STATUS_H 28
 #define GAP      4
 #define PAD      6
-#define TREND_H  30
-
-/* Chart page geometry, relative to the page container. */
-#define CHART_X  48
-#define CHART_Y  40
-#define CHART_H  150
-#define AXIS_W   44
-
-#define RETURN_MS 60000
+#define LINE_H   16	/* a line of Montserrat 14 */
 
 #define US IS_ENABLED(CONFIG_SENSOR_BOX_US_UNITS)
 
 /* Palette (dark theme). */
 #define COL_BG     lv_color_hex(0x000000)
 #define COL_TILE   lv_color_hex(0x1c1f24)
-#define COL_GRID   lv_color_hex(0x30353d)
 #define COL_TEXT   lv_color_hex(0xf2f2f2)
 #define COL_MUTED  lv_color_hex(0x8a9099)
-#define COL_TREND  lv_color_hex(0x5aa9e6)
 #define COL_GOOD   lv_color_hex(0x3ec46d)
 #define COL_FAIR   lv_color_hex(0xf2c94c)
 #define COL_POOR   lv_color_hex(0xf2994a)
 #define COL_BAD    lv_color_hex(0xeb5757)
 
-/* Trend values are stored as display units x TREND_SCALE (LVGL charts are int). */
-#define TREND_SCALE 100
-
 enum tile_id {
 	T_TEMP,
 	T_AH,
 	T_PRESS,
-	T_PM25,
+	T_PC03,
 	T_CO2,
 	T_TVOC,
-	T_TILES,		/* the readings above have dashboard tiles */
-	T_PC03 = T_TILES,	/* chart pages only: particles >0.3 um, */
-	T_LIGHT,		/* and light (lux is in the status bar) */
 	T_COUNT,
 };
 
-/* "\xc2\xb0" is the degree sign, which Montserrat includes. */
 static const struct {
-	const char *title;		/* dashboard tile */
-	const char *long_title;		/* chart page */
-	const char *unit;		/* chart page */
-	int decimals;
+	const char *title;
+	int decimals;			/* current value */
+	int delta_decimals;		/* change (at most) */
 	enum history_series series;
-	float min_span;			/* smallest trend y-range, display units */
-	bool log_scale;			/* chart log10(value); min_span in decades */
-	bool cap_spikes;		/* y range ignores rare huge spikes (see fill_trend) */
-	bool min0;			/* can't be negative: y range never dips below 0 */
+	bool pollutant;			/* falling is good: colour changes green / orange */
+	/*
+	 * The change compares the average of the newest `avg` minutes with the
+	 * average of `avg` minutes ending `minutes` ago, so one noisy reading
+	 * doesn't decide it.
+	 */
+	const char *window;		/* shown after the change: "in 3h" */
+	int minutes;
+	int avg;
+	/*
+	 * A change is "steady" (grey) within max(steady, steady_rel x the larger
+	 * of the two values), in metric units (degC, hPa, ...).
+	 */
+	float steady;
+	float steady_rel;
 } tile_def[T_COUNT] = {
-	[T_TEMP] = { "Temp", "Temperature", US ? "\xc2\xb0" "F" : "\xc2\xb0" "C",
-		     1, H_TEMP, US ? 2.0f : 1.0f },
-	[T_AH] = { "Humidity", "Absolute humidity", "g/m3", 1, H_AH, 1.0f, false, false, true },
-	[T_PRESS] = { "Pressure", "Pressure (sea level)", US ? "inHg" : "hPa",
-		      US ? 2 : 0, H_PRESS, US ? 0.05f : 2.0f },
-	[T_PM25] = { "PM2.5", "PM2.5", "ug/m3", 0, H_PM25, 10.0f, false, true, true },
-	[T_CO2] = { "CO2", "CO2", "ppm", 0, H_CO2, 200.0f, false, true, true },
-	[T_TVOC] = { "TVOC", "TVOC", "ppb", 0, H_TVOC, 50.0f, false, true, true },
-	[T_PC03] = { "Particles", "Particles >0.3 um", "/L", 0, H_PC03, 1.0f, true },
-	[T_LIGHT] = { "Light", "Light", "dB", 0, H_LUX, 10.0f, false },
+	[T_TEMP] = { "Temp", 1, 1, H_TEMP, false, "in 1h", 60, 5, 0.5f },
+	[T_AH] = { "Humidity", 1, 1, H_AH, false, "in 1h", 60, 5, 0.5f },
+	[T_PRESS] = { "Pressure", US ? 2 : 0, US ? 2 : 1, H_PRESS, false, "in 3h", 180, 10, 1.6f },
+	[T_PC03] = { "Particles", 0, 0, H_PC03, true, "in 15m", 15, 3, 300, 0.3f },
+	[T_CO2] = { "CO2", 0, 0, H_CO2, true, "in 15m", 15, 3, 50 },
+	[T_TVOC] = { "TVOC", 0, 0, H_TVOC, true, "in 15m", 15, 3, 30, 0.3f },
 };
-
-/* Floor for log-scale charts: a count of 0 plots as this (1 per 0.1 L). */
-#define LOG_FLOOR 10.0f
-
-/*
- * Chart pages show the last 6 hours: the 1-minute history averaged in threes,
- * 120 points across the chart (more than that would be denser than pixels).
- */
-#define CHART_GROUP  3
-#define CHART_POINTS 120
-#define CHART_HOURS  (CHART_POINTS * CHART_GROUP * HISTORY_PERIOD_S / 3600)
 
 struct tile {
 	lv_obj_t *value;
-	lv_obj_t *trend;
-	lv_obj_t *note;		/* shown over the trend area, e.g. "warming up" */
-	int32_t trend_vals[HISTORY_SHORT_LEN];
+	lv_obj_t *word;			/* what the change or level means, in words */
+	lv_obj_t *trend;		/* the change line: delta and its window */
+	lv_obj_t *delta;
+	lv_obj_t *note;			/* shown instead of trend, e.g. "warming up" */
 };
 
-static struct tile tiles[T_TILES];
+static struct tile tiles[T_COUNT];
 static lv_obj_t *light_label;
 static lv_obj_t *clock_label;
 static lv_obj_t *batt_label;
-
-/* Pages. page 0 is the dashboard; page k (1..T_COUNT) charts tile k - 1. */
-static lv_obj_t *dash_page;
-static lv_obj_t *chart_page;
-static int page;
-
-static struct {
-	lv_obj_t *title;
-	lv_obj_t *value;
-	lv_obj_t *chart;
-	lv_obj_t *y_max;
-	lv_obj_t *y_mid;
-	lv_obj_t *y_min;
-	lv_obj_t *note;
-	int32_t vals[CHART_POINTS];
-} detail;
-
-/* The latest readings, so a chart page can show the current value at once. */
-static struct readings last;
-static bool have_last;
-
-static void return_to_dashboard(struct k_work *work);
-static K_WORK_DELAYABLE_DEFINE(return_work, return_to_dashboard);
 
 /* Metric (as stored in readings/history) -> what the tile shows. */
 static float to_display(enum tile_id id, float v)
@@ -188,35 +140,22 @@ static float to_display(enum tile_id id, float v)
 	if (US && id == T_PRESS) {
 		return v / 33.8639f;	/* hPa -> inHg */
 	}
-	if (id == T_LIGHT) {
-		return (float)light_db(v);	/* lux -> dB re 1 lux */
-	}
 	return v;
 }
 
-/* Whether a reading's sensor is still in its warm-up. */
-static bool warming(enum tile_id id, const struct readings *r)
-{
-	switch (id) {
-	case T_PM25:
-	case T_PC03:
-		return r->pm_warming;
-	case T_CO2:
-		return r->co2_warming;
-	case T_TVOC:
-		return r->gas_warming;
-	default:
-		return false;
-	}
-}
-
-/* Why a reading has no value: shown where its trend line would be, or NULL. */
+/* Why a reading has no value: shown instead of its changes, or NULL. */
 static const char *status_note(enum tile_id id, const struct readings *r)
 {
-	if (id == T_CO2 && !r->co2_present) {
-		return "no sensor";
+	switch (id) {
+	case T_PC03:
+		return r->pm_warming ? "warming up" : NULL;
+	case T_CO2:
+		return !r->co2_present ? "no sensor" : r->co2_warming ? "warming up" : NULL;
+	case T_TVOC:
+		return r->gas_warming ? "warming up" : NULL;
+	default:
+		return NULL;
 	}
-	return warming(id, r) ? "warming up" : NULL;
 }
 
 /* Current value of a tile, in display units. False if not available. */
@@ -232,8 +171,8 @@ static bool current_value(enum tile_id id, const struct readings *r, float *v)
 	case T_PRESS:
 		*v = to_display(id, (float)r->press_sl_hpa);
 		return r->climate_ok;
-	case T_PM25:
-		*v = (float)r->pm2_5;
+	case T_PC03:
+		*v = (float)r->pc03_per_l;
 		return r->pm_ok;
 	case T_CO2:
 		*v = (float)r->co2_ppm;
@@ -241,164 +180,190 @@ static bool current_value(enum tile_id id, const struct readings *r, float *v)
 	case T_TVOC:
 		*v = (float)r->tvoc_ppb;
 		return r->gas_ok;
-	case T_PC03:
-		*v = (float)r->pc03_per_l;
-		return r->pm_ok;
-	case T_LIGHT:
-		*v = (float)light_db(r->lux);
-		return r->light_ok;
 	default:
 		return false;
 	}
 }
 
 /*
- * Air-quality bands -> colour; plain text colour for the climate readings.
+ * Air-quality bands -> colour; plain text colour for the others.
  * Upper bounds of good / fair / poor; anything above the last is bad.
- *   PM2.5: US EPA AQI breakpoints (2024).
  *   CO2:   common indoor ventilation guidance.
  *   TVOC:  German UBA indoor-air levels, in ppb.
  */
-static lv_color_t value_colour(enum tile_id id, float v)
+static int band(enum tile_id id, float v)
 {
 	static const float bands[T_COUNT][3] = {
-		[T_PM25] = { 9, 35, 55 },
 		[T_CO2] = { 800, 1200, 2000 },
 		[T_TVOC] = { 220, 660, 2200 },
 	};
 
-	if (id != T_PM25 && id != T_CO2 && id != T_TVOC) {
-		return COL_TEXT;
+	if (id != T_CO2 && id != T_TVOC) {
+		return -1;
 	}
-	if (v <= bands[id][0]) {
-		return COL_GOOD;
-	}
-	if (v <= bands[id][1]) {
-		return COL_FAIR;
-	}
-	if (v <= bands[id][2]) {
-		return COL_POOR;
-	}
-	return COL_BAD;
+	return v <= bands[id][0] ? 0 : v <= bands[id][1] ? 1 : v <= bands[id][2] ? 2 : 3;
+}
+
+static const char *const band_word[] = { "good", "fair", "poor", "bad" };
+
+static lv_color_t band_colour(int b)
+{
+	return b == 0 ? COL_GOOD : b == 1 ? COL_FAIR : b == 2 ? COL_POOR : COL_BAD;
+}
+
+static lv_color_t value_colour(enum tile_id id, float v)
+{
+	int b = band(id, v);
+
+	return b < 0 ? COL_TEXT : band_colour(b);
 }
 
 static void format(enum tile_id id, float v, char *buf, size_t len)
 {
-	int decimals = tile_def[id].decimals;
-
-	if (id == T_LIGHT && fabsf(v) < 10.0f) {
-		decimals = 1;
-	}
 	if (id == T_PC03 && v >= 10000.0f) {
-		/* Thousands, so axis labels fit. */
 		snprintf(buf, len, "%.0fk", (double)(v / 1000.0f));
 		return;
 	}
-	snprintf(buf, len, "%.*f", decimals, (double)v);
+	snprintf(buf, len, "%.*f", tile_def[id].decimals, (double)v);
 }
 
-/* Display value -> chart y (log10 for log-scale charts). */
-static float to_chart(enum tile_id id, float v)
+/* A change, signed: "+0.06", "-1.2", "+150", "+2.1k", "-12k"; "0" when it rounds to nothing. */
+static void format_delta(float d, int decimals, char *buf, size_t len)
 {
-	return tile_def[id].log_scale ? log10f(MAX(v, LOG_FLOOR)) : v;
+	float a = fabsf(d);
+	const char *sign = d > 0.0f ? "+" : "-";
+
+	if (a >= 9999.5f) {
+		snprintf(buf, len, "%s%.0fk", sign, (double)(a / 1000.0f));
+		return;
+	}
+	if (a >= 999.5f) {
+		snprintf(buf, len, "%s%.1fk", sign, (double)(a / 1000.0f));
+		return;
+	}
+	if (a >= 9.95f) {
+		decimals = 0;
+	} else if (a >= 0.995f) {
+		decimals = MIN(decimals, 1);
+	}
+	if (roundf(a * powf(10.0f, (float)decimals)) == 0.0f) {
+		snprintf(buf, len, "0");
+		return;
+	}
+	snprintf(buf, len, "%s%.*f", sign, decimals, (double)a);
 }
 
-/* Chart y -> display value, for axis labels. */
-static float from_chart(enum tile_id id, float y)
+/* Average of the valid points in [from, to]; NAN if none. */
+static float average(const float *pts, int from, int to)
 {
-	return tile_def[id].log_scale ? powf(10.0f, y) : y;
-}
+	float sum = 0.0f;
+	int n = 0;
 
-static int cmp_float(const void *a, const void *b)
-{
-	float x = *(const float *)a, y = *(const float *)b;
-
-	return (x > y) - (x < y);
+	for (int i = from; i <= to; i++) {
+		if (!isnan(pts[i])) {
+			sum += pts[i];
+			n++;
+		}
+	}
+	return n > 0 ? sum / n : NAN;
 }
 
 /*
- * Load a tile's history into vals (HISTORY_SHORT_LEN points from the short
- * window, or CHART_POINTS from the long one; newest at the right)
- * and set the chart's y range to fit, with margin_frac headroom above and
- * below. Returns the y range in chart units (see to_chart) via lo/hi;
- * false if no data.
+ * The words for a tile, and their colour: from the change d (metric units)
+ * if have_d, outside the steady band; for CO2 and TVOC from the current
+ * value v if have_v. "" for nothing to say.
  */
-static bool fill_trend(enum tile_id id, lv_obj_t *chart, int32_t *vals, bool short_window,
-		       float margin_frac, float *lo_out, float *hi_out)
+static const char *describe(enum tile_id id, bool have_d, float d, float steady, bool have_v,
+			    float v, lv_color_t *col)
 {
-	static float pts[MAX(CHART_POINTS, HISTORY_SHORT_LEN)];	/* only used under lvgl_lock */
-	static float sorted[ARRAY_SIZE(pts)];
-	int n_valid = 0;
-	int len = short_window ? HISTORY_SHORT_LEN : CHART_POINTS;
-	int n = short_window ? history_get(HW_SHORT, tile_def[id].series, pts, len, 1)
-			     : history_get(HW_LONG, tile_def[id].series, pts, len, CHART_GROUP);
-	int offset = len - n;
-	float lo = INFINITY;
-	float hi = -INFINITY;
+	bool up = d > 0.0f;
+	bool moving = have_d && fabsf(d) >= steady;
 
-	for (int i = 0; i < len; i++) {
-		vals[i] = LV_CHART_POINT_NONE;
-	}
-	for (int i = 0; i < n; i++) {
-		if (isnan(pts[i])) {
-			continue;
+	*col = COL_TEXT;
+	switch (id) {
+	case T_PRESS:
+		/*
+		 * Met Office / WMO tendency over 3 h: steady (here below 1.6 hPa,
+		 * where the daily pressure tide alone moves it), rising/falling to
+		 * 3.5, quickly to 6, very rapidly beyond.
+		 */
+		if (!have_d) {
+			return "";
 		}
-		float v = to_chart(id, to_display(id, pts[i]));
+		if (fabsf(d) < 1.6f) {
+			*col = COL_MUTED;
+			return "steady";
+		}
+		if (fabsf(d) < 3.6f) {
+			return up ? "rising" : "falling";
+		}
+		*col = fabsf(d) <= 6.0f ? COL_FAIR : COL_POOR;
+		return fabsf(d) <= 6.0f ? (up ? "rising fast" : "falling fast")
+					: (up ? "rapid rise" : "rapid fall");
+	case T_TEMP:
+		return !moving ? "" : up ? "warming" : "cooling";
+	case T_AH:
+		return !moving ? "" : up ? "damper" : "drier";
+	case T_PC03:
+		*col = up ? COL_POOR : COL_GOOD;
+		return !moving ? "" : up ? "rising" : "clearing";
+	case T_CO2:
+	case T_TVOC:
+		if (!have_v) {
+			return "";
+		}
+		*col = band_colour(band(id, v));
+		return band_word[band(id, v)];
+	default:
+		return "";
+	}
+}
 
-		lo = MIN(lo, v);
-		hi = MAX(hi, v);
-		sorted[n_valid++] = v;
-		vals[offset + i] = (int32_t)lroundf(v * TREND_SCALE);
+/*
+ * Fill in a tile's change (from the 24 h history) and words. v is the
+ * current value in display units, if have_v. Call under lvgl_lock().
+ */
+static void update_change(enum tile_id id, bool have_v, float v)
+{
+	static float pts[HISTORY_LEN];	/* only used under lvgl_lock */
+	struct tile *t = &tiles[id];
+	int n = history_get(HW_LONG, tile_def[id].series, pts, HISTORY_LEN, 1);
+	int64_t covered_s = history_covered_s(HW_LONG);
+	int k = tile_def[id].avg;
+	int then_end = n - 1 - tile_def[id].minutes;
+	int then_start = then_end - k + 1;
+	float now = NAN;
+	float then = NAN;
+	char buf[24];
+
+	/* Only compare against real history, not the boot-time backfill. */
+	if (then_start >= 0 && covered_s >= (int64_t)(n - 1 - then_start) * HISTORY_PERIOD_S) {
+		now = average(pts, n - k, n - 1);
+		then = average(pts, then_start, then_end);
+	}
+	bool have_d = !isnan(now) && !isnan(then);
+	float d = have_d ? now - then : 0.0f;	/* metric units */
+	float steady = have_d ? MAX(tile_def[id].steady,
+				    tile_def[id].steady_rel * MAX(fabsf(now), fabsf(then)))
+			      : 0.0f;
+	lv_color_t col;
+
+	lv_label_set_text_static(t->word, describe(id, have_d, d, steady, have_v, v, &col));
+	lv_obj_set_style_text_color(t->word, col, 0);
+
+	if (!have_d) {
+		lv_label_set_text_static(t->delta, "--");
+		lv_obj_set_style_text_color(t->delta, COL_MUTED, 0);
+		return;
 	}
 
-	bool have_data = lo <= hi;
-	bool capped = false;
-
-	/*
-	 * Pollutants: a brief huge spike (the SGP30 tops out at 60000) would
-	 * squash everything else flat. The range follows the bulk of the data
-	 * (its 90th percentile) with room for twice that; higher points are
-	 * pinned to the top edge. Same rule as the web page.
-	 */
-	if (have_data && tile_def[id].cap_spikes) {
-		qsort(sorted, n_valid, sizeof(sorted[0]), cmp_float);
-		float core = sorted[(int)(0.9f * (n_valid - 1))];
-		float cap = lo + 2.0f * MAX(core - lo, tile_def[id].min_span);
-
-		if (hi > cap) {
-			hi = cap;
-			capped = true;
-		}
-	}
-
-	if (have_data) {
-		/* Centre the data in at least min_span, so noise stays flat. */
-		float span = MAX(hi - lo, tile_def[id].min_span);
-		float mid = (hi + lo) / 2.0f;
-
-		span *= 1.0f + 2.0f * margin_frac;
-		*lo_out = mid - span / 2.0f;
-		*hi_out = mid + span / 2.0f;
-		if (tile_def[id].min0 && *lo_out < 0.0f) {
-			/* Shift up rather than show a negative axis (as the web page does). */
-			*hi_out -= *lo_out;
-			*lo_out = 0.0f;
-		}
-		if (capped) {
-			int32_t top = (int32_t)lroundf(*hi_out * TREND_SCALE);
-
-			for (int i = 0; i < len; i++) {
-				if (vals[i] != LV_CHART_POINT_NONE && vals[i] > top) {
-					vals[i] = top;
-				}
-			}
-		}
-		lv_chart_set_axis_range(chart, LV_CHART_AXIS_PRIMARY_Y,
-					(int32_t)lroundf(*lo_out * TREND_SCALE),
-					(int32_t)lroundf(*hi_out * TREND_SCALE));
-	}
-	lv_chart_refresh(chart);
-	return have_data;
+	col = fabsf(d) < steady ? COL_MUTED
+	      : !tile_def[id].pollutant ? COL_TEXT
+	      : d > 0.0f ? COL_POOR : COL_GOOD;
+	format_delta(to_display(id, now) - to_display(id, then), tile_def[id].delta_decimals,
+		     buf, sizeof(buf));
+	lv_label_set_text(t->delta, buf);
+	lv_obj_set_style_text_color(t->delta, col, 0);
 }
 
 static lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font, lv_color_t colour)
@@ -409,54 +374,6 @@ static lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font, lv_color_t 
 	lv_obj_set_style_text_font(label, font, 0);
 	lv_obj_set_style_text_color(label, colour, 0);
 	return label;
-}
-
-/* A fixed-width label with aligned text, placed at (x, y) in its parent. */
-static lv_obj_t *make_axis_label(lv_obj_t *parent, int32_t x, int32_t y, int32_t w,
-				 lv_text_align_t align, const char *text)
-{
-	lv_obj_t *label = make_label(parent, &lv_font_montserrat_14, COL_MUTED);
-
-	lv_obj_set_width(label, w);
-	lv_obj_set_style_text_align(label, align, 0);
-	lv_obj_set_pos(label, x, y);
-	if (text != NULL) {
-		lv_label_set_text_static(label, text);
-	}
-	return label;
-}
-
-/* A bare line chart for `len` points over an external array. */
-static lv_obj_t *make_chart(lv_obj_t *parent, int32_t *vals, int len)
-{
-	lv_obj_t *chart = lv_chart_create(parent);
-
-	lv_obj_remove_style_all(chart);
-	lv_chart_set_type(chart, LV_CHART_TYPE_LINE);
-	lv_chart_set_div_line_count(chart, 0, 0);
-	lv_chart_set_point_count(chart, len);
-	lv_obj_set_style_line_width(chart, 2, LV_PART_ITEMS);
-	lv_obj_set_style_line_rounded(chart, true, LV_PART_ITEMS);
-	lv_obj_set_style_size(chart, 0, 0, LV_PART_INDICATOR);
-
-	lv_chart_series_t *ser = lv_chart_add_series(chart, COL_TREND, LV_CHART_AXIS_PRIMARY_Y);
-
-	for (int i = 0; i < len; i++) {
-		vals[i] = LV_CHART_POINT_NONE;
-	}
-	lv_chart_set_series_ext_y_array(chart, ser, vals);
-	return chart;
-}
-
-static lv_obj_t *make_page(lv_obj_t *scr, int32_t w, int32_t h)
-{
-	lv_obj_t *p = lv_obj_create(scr);
-
-	lv_obj_remove_style_all(p);
-	lv_obj_set_size(p, w, h);
-	lv_obj_set_pos(p, 0, STATUS_H);
-	lv_obj_remove_flag(p, LV_OBJ_FLAG_SCROLLABLE);
-	return p;
 }
 
 static lv_obj_t *make_tile(lv_obj_t *parent, enum tile_id id, int32_t w, int32_t h)
@@ -481,55 +398,40 @@ static lv_obj_t *make_tile(lv_obj_t *parent, enum tile_id id, int32_t w, int32_t
 	lv_label_set_text_static(t->value, "--");
 	lv_obj_align(t->value, LV_ALIGN_TOP_MID, 0, 16);
 
-	t->trend = make_chart(box, t->trend_vals, HISTORY_SHORT_LEN);
-	lv_obj_set_size(t->trend, LV_PCT(100), TREND_H);
+	/*
+	 * The words, between the value (which ends 46 px down) and the change
+	 * line. The widest, "falling fast", is 74 px.
+	 */
+	t->word = make_label(box, &lv_font_montserrat_14, COL_TEXT);
+	lv_obj_align(t->word, LV_ALIGN_BOTTOM_MID, 0, -(LINE_H + 3));
+
+	/*
+	 * The change line, at the very bottom: "+0.06" (coloured) then "in 3h"
+	 * (grey), centred. It spans the whole tile, padding included: the
+	 * widest, "+444k in 15m", is 95 px.
+	 */
+	t->trend = lv_obj_create(box);
+	lv_obj_remove_style_all(t->trend);
+	lv_obj_set_size(t->trend, w, LINE_H);
 	lv_obj_align(t->trend, LV_ALIGN_BOTTOM_MID, 0, 0);
+	lv_obj_remove_flag(t->trend, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_add_flag(t->trend, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+	lv_obj_set_flex_flow(t->trend, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(t->trend, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+			      LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(t->trend, 5, 0);
+
+	t->delta = make_label(t->trend, &lv_font_montserrat_14, COL_MUTED);
+	lv_label_set_text_static(t->delta, "--");
+
+	lv_obj_t *window = make_label(t->trend, &lv_font_montserrat_14, COL_MUTED);
+
+	lv_label_set_text_static(window, tile_def[id].window);
 
 	t->note = make_label(box, &lv_font_montserrat_14, COL_MUTED);
-	lv_obj_align(t->note, LV_ALIGN_BOTTOM_MID, 0, -(TREND_H - 14) / 2);
+	lv_obj_align(t->note, LV_ALIGN_BOTTOM_MID, 0, -(LINE_H + 3) / 2);
 
 	return box;
-}
-
-static void make_chart_page(lv_obj_t *p, int32_t w)
-{
-	int32_t chart_w = w - CHART_X - 2 * GAP;
-
-	detail.title = make_label(p, &lv_font_montserrat_14, COL_TEXT);
-	lv_obj_align(detail.title, LV_ALIGN_TOP_LEFT, GAP + 2, 10);
-
-	detail.value = make_label(p, &lv_font_montserrat_28, COL_TEXT);
-	lv_obj_align(detail.value, LV_ALIGN_TOP_RIGHT, -GAP - 2, 0);
-
-	detail.chart = make_chart(p, detail.vals, CHART_POINTS);
-	lv_obj_set_size(detail.chart, chart_w, CHART_H);
-	lv_obj_set_pos(detail.chart, CHART_X, CHART_Y);
-	lv_obj_set_style_bg_color(detail.chart, COL_TILE, 0);
-	lv_obj_set_style_bg_opa(detail.chart, LV_OPA_COVER, 0);
-	/* Grid lines at the top, middle and bottom, matching the y labels. */
-	lv_chart_set_div_line_count(detail.chart, 3, 0);
-	lv_obj_set_style_line_color(detail.chart, COL_GRID, LV_PART_MAIN);
-	lv_obj_set_style_line_width(detail.chart, 1, LV_PART_MAIN);
-
-	/* y labels, right-aligned against the chart, centred on the grid lines. */
-	int32_t half = 8;
-
-	detail.y_max = make_axis_label(p, 0, CHART_Y - half, AXIS_W, LV_TEXT_ALIGN_RIGHT, NULL);
-	detail.y_mid = make_axis_label(p, 0, CHART_Y + CHART_H / 2 - half, AXIS_W,
-				       LV_TEXT_ALIGN_RIGHT, NULL);
-	detail.y_min = make_axis_label(p, 0, CHART_Y + CHART_H - half, AXIS_W,
-				       LV_TEXT_ALIGN_RIGHT, NULL);
-
-	/* Time axis: CHART_HOURS (6) hours. */
-	BUILD_ASSERT(CHART_HOURS == 6, "time axis labels assume 6 hours");
-	int32_t time_y = CHART_Y + CHART_H + 4;
-
-	make_axis_label(p, CHART_X, time_y, 40, LV_TEXT_ALIGN_LEFT, "-6h");
-	make_axis_label(p, CHART_X + chart_w / 2 - 20, time_y, 40, LV_TEXT_ALIGN_CENTER, "-3h");
-	make_axis_label(p, CHART_X + chart_w - 40, time_y, 40, LV_TEXT_ALIGN_RIGHT, "now");
-
-	detail.note = make_label(p, &lv_font_montserrat_14, COL_MUTED);
-	lv_obj_align_to(detail.note, detail.chart, LV_ALIGN_CENTER, 0, 0);
 }
 
 int ui_init(void)
@@ -565,23 +467,17 @@ int ui_init(void)
 	clock_label = make_label(scr, &lv_font_montserrat_14, COL_TEXT);
 	lv_obj_align(clock_label, LV_ALIGN_TOP_MID, 0, (STATUS_H - 14) / 2);
 
-	/* Dashboard: 3 x 2 grid of tiles under the status bar. */
-	dash_page = make_page(scr, scr_w, scr_h - STATUS_H);
-
+	/* 3 x 2 grid of tiles under the status bar. */
 	int32_t tile_w = (scr_w - 4 * GAP) / 3;
 	int32_t tile_h = (scr_h - STATUS_H - 2 * GAP) / 2;
 
-	for (int i = 0; i < T_TILES; i++) {
-		lv_obj_t *box = make_tile(dash_page, i, tile_w, tile_h);
+	for (int i = 0; i < T_COUNT; i++) {
+		lv_obj_t *box = make_tile(scr, i, tile_w, tile_h);
 		int col = i % 3;
 		int row = i / 3;
 
-		lv_obj_set_pos(box, GAP + col * (tile_w + GAP), row * (tile_h + GAP));
+		lv_obj_set_pos(box, GAP + col * (tile_w + GAP), STATUS_H + row * (tile_h + GAP));
 	}
-
-	chart_page = make_page(scr, scr_w, scr_h - STATUS_H);
-	make_chart_page(chart_page, scr_w);
-	lv_obj_add_flag(chart_page, LV_OBJ_FLAG_HIDDEN);
 
 	lvgl_unlock();
 
@@ -589,95 +485,14 @@ int ui_init(void)
 	return 0;
 }
 
-/* Redraw the chart page for the current page. Call under lvgl_lock(). */
-static void render_chart_page(void)
-{
-	enum tile_id id = page - 1;
-	char buf[32];
-	float v;
-	float lo;
-	float hi;
-
-	lv_label_set_text_static(detail.title, tile_def[id].long_title);
-
-	if (have_last && current_value(id, &last, &v)) {
-		format(id, v, buf, sizeof(buf));
-		lv_label_set_text_fmt(detail.value, "%s %s", buf, tile_def[id].unit);
-		lv_obj_set_style_text_color(detail.value, value_colour(id, v), 0);
-	} else {
-		lv_label_set_text_fmt(detail.value, "-- %s", tile_def[id].unit);
-		lv_obj_set_style_text_color(detail.value, COL_MUTED, 0);
-	}
-
-	if (fill_trend(id, detail.chart, detail.vals, false, 0.05f, &lo, &hi)) {
-		format(id, from_chart(id, hi), buf, sizeof(buf));
-		lv_label_set_text(detail.y_max, buf);
-		format(id, from_chart(id, (lo + hi) / 2.0f), buf, sizeof(buf));
-		lv_label_set_text(detail.y_mid, buf);
-		format(id, from_chart(id, lo), buf, sizeof(buf));
-		lv_label_set_text(detail.y_min, buf);
-		lv_label_set_text_static(detail.note, "");
-	} else {
-		lv_label_set_text_static(detail.y_max, "");
-		lv_label_set_text_static(detail.y_mid, "");
-		lv_label_set_text_static(detail.y_min, "");
-		lv_label_set_text_static(detail.note,
-					 have_last && status_note(id, &last) ? status_note(id, &last)
-								       : "no data yet");
-	}
-	lv_obj_align_to(detail.note, detail.chart, LV_ALIGN_CENTER, 0, 0);
-}
-
-/* Switch page. Call under lvgl_lock(). */
-static void show_page(int p)
-{
-	page = p;
-	if (page == 0) {
-		lv_obj_add_flag(chart_page, LV_OBJ_FLAG_HIDDEN);
-		lv_obj_remove_flag(dash_page, LV_OBJ_FLAG_HIDDEN);
-	} else {
-		render_chart_page();
-		lv_obj_add_flag(dash_page, LV_OBJ_FLAG_HIDDEN);
-		lv_obj_remove_flag(chart_page, LV_OBJ_FLAG_HIDDEN);
-	}
-}
-
-static void return_to_dashboard(struct k_work *work)
-{
-	ARG_UNUSED(work);
-
-	lvgl_lock();
-	show_page(0);
-	lvgl_unlock();
-}
-
-void ui_next_page(void)
-{
-	if (dash_page == NULL) {
-		return;		/* ui_init failed */
-	}
-
-	lvgl_lock();
-	show_page((page + 1) % (T_COUNT + 1));
-	bool on_chart = page != 0;
-	lvgl_unlock();
-
-	if (on_chart) {
-		k_work_reschedule(&return_work, K_MSEC(RETURN_MS));
-	} else {
-		k_work_cancel_delayable(&return_work);
-	}
-}
-
 static void update_tile(enum tile_id id, const struct readings *r)
 {
 	struct tile *t = &tiles[id];
 	char buf[32];
-	float v;
-	float lo;
-	float hi;
+	float v = 0.0f;
+	bool have_v = current_value(id, r, &v);
 
-	if (current_value(id, r, &v)) {
+	if (have_v) {
 		format(id, v, buf, sizeof(buf));
 		lv_label_set_text(t->value, buf);
 		lv_obj_set_style_text_color(t->value, value_colour(id, v), 0);
@@ -686,7 +501,18 @@ static void update_tile(enum tile_id id, const struct readings *r)
 		lv_obj_set_style_text_color(t->value, COL_MUTED, 0);
 	}
 
-	fill_trend(id, t->trend, t->trend_vals, true, 0.0f, &lo, &hi);
+	/* During a sensor's warm-up (or without one), say so instead of the change. */
+	const char *note = status_note(id, r);
+
+	lv_label_set_text_static(t->note, note ? note : "");
+	if (note) {
+		lv_obj_add_flag(t->trend, LV_OBJ_FLAG_HIDDEN);
+		lv_obj_add_flag(t->word, LV_OBJ_FLAG_HIDDEN);
+	} else {
+		lv_obj_remove_flag(t->trend, LV_OBJ_FLAG_HIDDEN);
+		lv_obj_remove_flag(t->word, LV_OBJ_FLAG_HIDDEN);
+		update_change(id, have_v, v);
+	}
 }
 
 void ui_update(const struct readings *r)
@@ -695,19 +521,8 @@ void ui_update(const struct readings *r)
 
 	lvgl_lock();
 
-	last = *r;
-	have_last = true;
-
-	for (int i = 0; i < T_TILES; i++) {
+	for (int i = 0; i < T_COUNT; i++) {
 		update_tile(i, r);
-		/* During a sensor's warm-up (or without one), say so where the trend line goes. */
-		const char *note = status_note(i, r);
-
-		lv_label_set_text_static(tiles[i].note, note ? note : "");
-	}
-
-	if (page != 0) {
-		render_chart_page();
 	}
 
 	/* Clock: blank until the first SNTP sync. 12-hour with US units. */
