@@ -96,7 +96,7 @@
   </h2>
   <div class="charts" id="charts"></div>
 
-  <footer>The last 24 hours are kept in 1-minute detail (restored from the SD card after a restart; without a card, earlier hours come from the hourly log). Week and longer show hourly averages (3-hour for 3 Months), with pollutant peaks as the fainter line; they're kept for about 4 months. Click a chart to zoom in to the next shorter range around that moment; ← and → step back and forth by half the range, and Now returns to the present. More than a day back, 1-minute detail comes from the SD card's log (hourly without a card). Times are in your browser's time zone.</footer>
+  <footer>The last 24 hours are kept in 1-minute detail (restored from the SD card after a restart; without a card, earlier hours come from the hourly log). Week and longer show hourly averages (3-hour for 3 Months), with pollutant peaks (the highest reading each hour) as the fainter line, which Day shows too; they're kept for about 4 months. Click a chart to zoom in to the next shorter range around that moment; ← and → step back and forth by half the range, and Now returns to the present. More than a day back, 1-minute detail comes from the SD card's log (hourly without a card). Times are in your browser's time zone.</footer>
 </main>
 
 <script>
@@ -435,7 +435,9 @@ function hourlyRows(d) {
 // placeholder), so the part of the window before that comes from the SD card's
 // minute log, and the hourly log for any hour with no minutes.
 // The pollutants' peak line comes from the hourly log throughout (1-minute
-// averages smooth the peaks away), ending with the hour so far.
+// averages smooth the peaks away), ending with the hour so far. It's only
+// drawn for a day or more: a shorter window holds a handful of hourly peaks,
+// which join into a meaningless slope, and its line already shows the detail.
 function liveCharts(box, cfg, d, early, minutes, step) {
   step = step || 1;   // minutes per row of the minute log
   const end = d.t || nowS();     // the device's now
@@ -466,7 +468,7 @@ function liveCharts(box, cfg, d, early, minutes, step) {
                                    return [r[0] + 1800, v === null ? null : m.conv(v)]; });
     const mins = minuteRows.map(r => [r.t + 30 * step,
                                       r.v[m.key] === null ? null : m.conv(r.v[m.key])]);
-    const peaks = !m.peak ? null : peakRows.map(([t, r]) => {
+    const peaks = !m.peak || cfg.span < 86400 ? null : peakRows.map(([t, r]) => {
       const v = rowValue(early, r, m.peak);
       return [t, v === null ? null : m.conv(v)];
     });
