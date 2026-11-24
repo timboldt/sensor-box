@@ -133,6 +133,30 @@ static void feed_scd4x_pressure(double press_hpa)
 	}
 }
 
+/*
+ * Turn the SCD-4x's automatic self-calibration (ASC) off. ASC assumes the
+ * lowest reading of each period (~weekly) is fresh outdoor air at ~400 ppm,
+ * which a closed room may never see, so it would drag readings down; the
+ * factory calibration checked out outdoors. The setting is not persisted
+ * (no EEPROM write each boot), so it's sent again at every boot.
+ */
+static void scd4x_disable_asc(void)
+{
+	if (scd4x == NULL || !device_is_ready(scd4x)) {
+		return;
+	}
+
+	struct sensor_value off = { .val1 = 0 };
+
+	if (sensor_attr_set(scd4x, SENSOR_CHAN_ALL,
+			    (enum sensor_attribute)SENSOR_ATTR_SCD4X_AUTOMATIC_CALIB_ENABLE,
+			    &off) == 0) {
+		LOG_INF("scd4x: automatic self-calibration off");
+	} else {
+		LOG_WRN("scd4x: failed to turn automatic self-calibration off");
+	}
+}
+
 static void report_bme280(struct readings *r)
 {
 	if (bme280 == NULL || !device_is_ready(bme280)) {
@@ -370,6 +394,7 @@ int main(void)
 	/* A missing display is logged and skipped, like any other device. */
 	bool have_ui = ui_init() == 0;
 
+	scd4x_disable_asc();
 	backlight_init();
 	baseline_init();
 	light_init();

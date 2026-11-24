@@ -12,10 +12,9 @@ here is promised; it's a place to keep them.
   - see whether the SGP30's "measure command failed: -14" boot warning goes
     away (it appeared once the SCD4x node was added, while the sensor is
     absent);
-  - decide on automatic self-calibration (ASC): it assumes the sensor sees
-    fresh outdoor air (~400 ppm) at least weekly, which a closed bedroom may
-    not. Options: turn it off, or do a one-off forced calibration by an open
-    window;
+  - automatic self-calibration (ASC) is now turned off at boot (the factory
+    calibration read spot on outdoors). If it drifts, add a console command
+    for a forced recalibration by an open window;
   - watch for brownouts: its measurement peaks (~150-200 mA) share the 3.3 V
     rail with the PMSA003I fan and Wi-Fi bursts.
 
