@@ -31,7 +31,9 @@ local network.
   (fan spin-up), TVOC for the SGP30's first ~15 s, and CO2 until the SCD-43's
   first measurement (~5 s).
 - **CO2** comes from an SCD-43 (true CO2, 400–5000 ppm), corrected with the
-  BME280's pressure. Without one the CO2 tile says "no sensor". The SGP30's
+  BME280's pressure. Its automatic self-calibration is turned off at boot
+  (it assumes fresh ~400 ppm air weekly, which a closed room may not get);
+  the factory calibration is used. Without one the CO2 tile says "no sensor". The SGP30's
   eCO2 is only an estimate from TVOC, so it's no longer shown (it's still in
   the console log).
 - **SGP30 baseline:** the TVOC sensor learns a clean-air baseline over
